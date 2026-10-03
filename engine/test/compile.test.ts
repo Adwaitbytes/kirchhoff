@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { toFunctionSelector } from "viem";
 import { describe, expect, it } from "vitest";
 import { compileWorkflows, creConfidence, resolveSpec, type Deployments } from "../src/compile.ts";
+import { reviveSpec } from "../src/spec-json.ts";
 import { CCIP_TOPICS } from "../src/adapters/ccip.ts";
 import { CONTRACT_EVENTS } from "../src/contract-events.ts";
 import { compileSpecDocuments, parseSpec } from "../src/spec/index.ts";
@@ -152,6 +153,49 @@ describe("compileWorkflows", () => {
     expect(r.warnings).toEqual([
       "bridge ccip: search_window_blocks 50000 exceeds CRE's 100-block filterLogs limit; queries use 100",
     ]);
+  });
+});
+
+describe("W2 supply triggers and registry flags (workflows R3, R6)", () => {
+  const ZERO_TOPIC = `0x${"0".repeat(64)}`;
+  const TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+  const padded = (a: string) => `0x${"0".repeat(24)}${a.slice(2)}`;
+
+  it("filters mints and burns on remotes and escrow-holder transfers on home, one trigger per side", () => {
+    const r = compileWorkflows(makeSpec(), DEPLOYMENTS, hash("h"));
+    if (!r.ok) throw new Error(r.errors.join("\n"));
+    const holders = [padded(addr(0x1002)), padded(addr(0x1006))];
+    expect(r.configs["w2-loop"].supplyTriggers.map((t) => [t.chain, t.side, t.topics])).toEqual([
+      ["ethereum-testnet-sepolia", "escrow_in", [[TRANSFER], [], holders]],
+      ["ethereum-testnet-sepolia", "escrow_out", [[TRANSFER], holders, []]],
+      ["ethereum-testnet-sepolia-arbitrum-1", "mint", [[TRANSFER], [ZERO_TOPIC], []]],
+      ["ethereum-testnet-sepolia-arbitrum-1", "burn", [[TRANSFER], [], [ZERO_TOPIC]]],
+      ["ethereum-testnet-sepolia-base-1", "mint", [[TRANSFER], [ZERO_TOPIC], []]],
+      ["ethereum-testnet-sepolia-base-1", "burn", [[TRANSFER], [], [ZERO_TOPIC]]],
+    ]);
+  });
+
+  it("treats the home chain as a minting chain for burn-and-mint tokens", () => {
+    const r = compileWorkflows(makeSpec({ model: "burn_mint_multi" }), DEPLOYMENTS, hash("h"));
+    if (!r.ok) throw new Error(r.errors.join("\n"));
+    expect(r.configs["w2-loop"].supplyTriggers.slice(0, 2).map((t) => t.side)).toEqual(["mint", "burn"]);
+  });
+
+  it("flags which W2 debit watches can be confirmed through debitOf, and embeds the revivable spec", () => {
+    const spec = makeSpec();
+    const r = compileWorkflows(spec, DEPLOYMENTS, hash("h"));
+    if (!r.ok) throw new Error(r.errors.join("\n"));
+    const w2 = r.configs["w2-loop"];
+    expect(w2.debitEvents.map((d) => [d.adapter, d.registry !== null])).toEqual([
+      ["ccip_v2", false],
+      ["ccip_v2", false],
+      ["ccip_v2", false],
+      ["weakbridge", true],
+      ["weakbridge", true],
+      ["weakbridge", true],
+    ]);
+    expect(reviveSpec(r.configs["w1-junction"].spec)).toEqual(r.spec);
+    expect(reviveSpec(w2.spec)).toEqual(r.spec);
   });
 });
 

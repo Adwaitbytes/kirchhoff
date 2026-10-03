@@ -137,7 +137,12 @@ export function protectedTransfer(message: ParsedMessage, cache: readonly SpecCa
   return entry === undefined ? null : { entry, amount: transfer.amount };
 }
 
-/** `statusOf(tokenId)` from one RPC provider, or the error it returned. */
+/**
+ * `statusOf(tokenId)` from one RPC provider, or the error it returned. For
+ * BROKEN, QUARANTINED and RECOVERING, `reason` must come from the active
+ * incident's breach record (`breachOf(incident).reason`): the ledger never
+ * rewrites latestEpoch on a BREACH, so its epoch reason is stale.
+ */
 export type StatusRead =
   | { ok: true; status: Status; delta: bigint; epochId: bigint; stale: boolean; reason: Reason }
   | { ok: false; error: string };
@@ -145,6 +150,22 @@ export type StatusRead =
 export type ProviderPair = readonly [StatusRead, StatusRead];
 
 export type SourceDebitLookup = { kind: "found"; amount: bigint } | { kind: "missing" };
+
+/** One provider's answer for a plain read, or the error it returned. */
+export type Read<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/** The same read through the Judge's two independent RPC providers. */
+export type ReadPair<T> = readonly [Read<T>, Read<T>];
+
+type Agreed<T> = { ok: true; value: T } | { ok: false };
+
+function agreeOn<T>(pair: ReadPair<T>, same: (a: T, b: T) => boolean): Agreed<T> {
+  const [a, b] = pair;
+  return a.ok && b.ok && same(a.value, b.value) ? { ok: true, value: a.value } : { ok: false };
+}
+
+const sameDebit = (a: SourceDebitLookup, b: SourceDebitLookup): boolean =>
+  a.kind === "missing" ? b.kind === "missing" : b.kind === "found" && a.amount === b.amount;
 
 /** Everything the Judge service read for the protected token in the message. */
 export type TokenEvaluation = {
@@ -157,12 +178,23 @@ export type TokenEvaluation = {
   /** Active spec hash in KirchhoffRegistry; null when the registry has no active spec for the token. */
   activeSpecHash: Hex | null;
   onStale: OnStale;
+  /**
+   * False when the message's destination selector (or its source) is not a
+   * chain of the token's spec: a lane the issuer never declared is a
+   * definitive SPEC_MISMATCH in step 3.
+   */
+  laneInSpec: boolean;
   source: ProviderPair;
   destination: ProviderPair;
-  frozen: boolean;
-  senderTainted: boolean;
-  /** The source pool debit for the message id: pool LockedOrBurned paired with CCIPMessageSent in source_tx_hash. */
-  sourceDebit: SourceDebitLookup;
+  /** `isFrozen(tokenId)` through both providers. */
+  frozen: ReadPair<boolean>;
+  /** `isTainted(tokenId, sender)` through both providers. */
+  senderTainted: ReadPair<boolean>;
+  /**
+   * The source pool debit for the message id through both providers: pool
+   * LockedOrBurned paired with CCIPMessageSent in source_tx_hash.
+   */
+  sourceDebit: ReadPair<SourceDebitLookup>;
   /** Latest incident for the token, quoted in FAIL notes when the token is contained. */
   incidentId: Hex | null;
 };
@@ -220,6 +252,7 @@ export function judge(input: JudgeInput): JudgeDecision {
   if (t.activeSpecHash.toLowerCase() !== t.cachedSpecHash.toLowerCase()) {
     return decide("FAIL", Reason.SPEC_MISMATCH, t.symbol, "cached spec differs from active registry spec");
   }
+  if (!t.laneInSpec) return decide("FAIL", Reason.SPEC_MISMATCH, t.symbol, "lane not in spec");
   if (input.budgetExceeded) return decide("PENDING", Reason.PENDING_ATTESTATION, t.symbol, "time budget exceeded, retry");
 
   // Step 5: both providers must agree on both chains.
@@ -240,20 +273,27 @@ export function judge(input: JudgeInput): JudgeDecision {
     }
   }
 
-  // Step 7: containment flags.
-  if (t.frozen) return decide("FAIL", Reason.TOKEN_QUARANTINED, t.symbol, "lanes frozen");
-  if (t.senderTainted) return decide("FAIL", Reason.TOKEN_QUARANTINED, t.symbol, "sender tainted");
+  // Step 7: containment flags. A flag both providers agree is set fails at once,
+  // whatever the other flag reads; only an undecided flag makes the answer PENDING.
+  const frozen = agreeOn(t.frozen, (a, b) => a === b);
+  const tainted = agreeOn(t.senderTainted, (a, b) => a === b);
+  if (frozen.ok && frozen.value) return decide("FAIL", Reason.TOKEN_QUARANTINED, t.symbol, "lanes frozen");
+  if (tainted.ok && tainted.value) return decide("FAIL", Reason.TOKEN_QUARANTINED, t.symbol, "sender tainted");
+  if (!frozen.ok) return decide("PENDING", Reason.PENDING_ATTESTATION, t.symbol, "providers disagree on frozen, retry");
+  if (!tainted.ok) return decide("PENDING", Reason.PENDING_ATTESTATION, t.symbol, "providers disagree on senderTainted, retry");
 
   // Step 8: the source pool debit for this message id must exist with the same amount.
-  if (t.sourceDebit.kind === "missing") {
+  const debit = agreeOn(t.sourceDebit, sameDebit);
+  if (!debit.ok) return decide("PENDING", Reason.PENDING_ATTESTATION, t.symbol, "providers disagree on sourceDebit, retry");
+  if (debit.value.kind === "missing") {
     return decide("PENDING", Reason.PENDING_ATTESTATION, t.symbol, "source debit not yet visible, retry");
   }
-  if (t.sourceDebit.amount !== t.amount) {
+  if (debit.value.amount !== t.amount) {
     return decide(
       "FAIL",
       Reason.AMOUNT_MISMATCH,
       t.symbol,
-      `debit=${t.sourceDebit.amount.toString()} transfer=${t.amount.toString()}`,
+      `debit=${debit.value.amount.toString()} transfer=${t.amount.toString()}`,
     );
   }
 

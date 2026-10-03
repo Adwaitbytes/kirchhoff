@@ -6,6 +6,9 @@ import {
   parseHookRequest,
   protectedTransfer,
   type ParsedMessage,
+  type Read,
+  type ReadPair,
+  type SourceDebitLookup,
   type SpecCacheEntry,
   type StatusRead,
   type TokenEvaluation,
@@ -17,6 +20,9 @@ import { ALICE, ARB, CANONICAL, HOME, POOL_ARB, REMOTE_ARB, hash, units } from "
 const ID = hash("ccip-msg");
 const SPEC_HASH = hash("spec");
 const conserved: StatusRead = { ok: true, status: Status.CONSERVED, delta: 0n, epochId: 4182n, stale: false, reason: Reason.OK };
+const ok = <T>(value: T): Read<T> => ({ ok: true, value });
+const both = <T>(value: T): ReadPair<T> => [ok(value), ok(value)];
+const down: Read<never> = { ok: false, error: "timeout" };
 const padded = (a: Hex): string => `0x${"0".repeat(24)}${a.slice(2)}`;
 
 function token(over: Partial<TokenEvaluation> = {}): TokenEvaluation {
@@ -29,9 +35,10 @@ function token(over: Partial<TokenEvaluation> = {}): TokenEvaluation {
     onStale: "fail_closed",
     source: [conserved, conserved],
     destination: [conserved, conserved],
-    frozen: false,
-    senderTainted: false,
-    sourceDebit: { kind: "found", amount: units(10n) },
+    laneInSpec: true,
+    frozen: both(false),
+    senderTainted: both(false),
+    sourceDebit: both<SourceDebitLookup>({ kind: "found", amount: units(10n) }),
     incidentId: null,
     ...over,
   };
@@ -213,17 +220,43 @@ describe("judge: PRD section 9 steps 3 to 9 with INTERFACES.md revision 2", () =
     });
   });
 
+  it("step 3: a lane outside the spec is a definitive SPEC_MISMATCH", () => {
+    expect(run(token({ laneInSpec: false }))).toMatchObject({ decision: "FAIL", reason: Reason.SPEC_MISMATCH, note: "lane not in spec" });
+  });
+
   it("step 7: frozen lanes and tainted senders fail TOKEN_QUARANTINED", () => {
-    expect(run(token({ frozen: true }))).toMatchObject({ decision: "FAIL", reason: Reason.TOKEN_QUARANTINED, note: "lanes frozen" });
-    expect(run(token({ senderTainted: true }))).toMatchObject({ reason: Reason.TOKEN_QUARANTINED, note: "sender tainted" });
+    expect(run(token({ frozen: both(true) }))).toMatchObject({ decision: "FAIL", reason: Reason.TOKEN_QUARANTINED, note: "lanes frozen" });
+    expect(run(token({ senderTainted: both(true) }))).toMatchObject({ reason: Reason.TOKEN_QUARANTINED, note: "sender tainted" });
+  });
+
+  it("step 7: an agreed flag fails even when the other flag is disputed", () => {
+    expect(run(token({ frozen: [ok(true), down], senderTainted: both(true) }))).toMatchObject({ decision: "FAIL", note: "sender tainted" });
+    expect(run(token({ frozen: both(true), senderTainted: [ok(false), ok(true)] }))).toMatchObject({ decision: "FAIL", note: "lanes frozen" });
+  });
+
+  it.each([
+    ["frozen disagreement", { frozen: [ok(false), ok(true)] as const }, "frozen"],
+    ["frozen error", { frozen: [down, ok(false)] as const }, "frozen"],
+    ["taint error", { senderTainted: [ok(false), down] as const }, "senderTainted"],
+    ["debit error", { sourceDebit: [ok<SourceDebitLookup>({ kind: "missing" }), down] as const }, "sourceDebit"],
+    ["debit found vs missing", { sourceDebit: [ok<SourceDebitLookup>({ kind: "found", amount: 1n }), ok<SourceDebitLookup>({ kind: "missing" })] as const }, "sourceDebit"],
+    ["debit missing vs found", { sourceDebit: [ok<SourceDebitLookup>({ kind: "missing" }), ok<SourceDebitLookup>({ kind: "found", amount: 1n })] as const }, "sourceDebit"],
+    ["debit amounts differ", { sourceDebit: [ok<SourceDebitLookup>({ kind: "found", amount: 1n }), ok<SourceDebitLookup>({ kind: "found", amount: 2n })] as const }, "sourceDebit"],
+  ])("steps 7 and 8: %s is PENDING", (_label, over, field) => {
+    const r = run(token(over));
+    expect(r).toMatchObject({ decision: "PENDING", reason: Reason.PENDING_ATTESTATION });
+    expect(r.note).toBe(`providers disagree on ${field}, retry`);
   });
 
   it("step 8: a missing source debit is PENDING; a different amount is a definitive AMOUNT_MISMATCH", () => {
-    expect(run(token({ sourceDebit: { kind: "missing" } }))).toMatchObject({
+    expect(run(token({ sourceDebit: both<SourceDebitLookup>({ kind: "missing" }) }))).toMatchObject({
       decision: "PENDING",
       reasonString: "PENDING_ATTESTATION kETH source debit not yet visible, retry",
     });
-    expect(run(token({ sourceDebit: { kind: "found", amount: 1n } }))).toMatchObject({ decision: "FAIL", reason: Reason.AMOUNT_MISMATCH });
+    expect(run(token({ sourceDebit: both<SourceDebitLookup>({ kind: "found", amount: 1n }) }))).toMatchObject({
+      decision: "FAIL",
+      reason: Reason.AMOUNT_MISMATCH,
+    });
   });
 
   it("caps the reason string at 256 characters", () => {
@@ -237,7 +270,7 @@ describe("hookResponse", () => {
       status: 200,
       body: { decision: "PASS", reason: "OK kETH CONSERVED delta=0 epoch=4182", message_id: ID },
     });
-    expect(hookResponse(ID, run(token({ frozen: true }))).status).toBe(200);
+    expect(hookResponse(ID, run(token({ frozen: both(true) }))).status).toBe(200);
     expect(hookResponse(ID, run(token(), true))).toEqual({
       status: 503,
       body: { error: "PENDING_ATTESTATION kETH time budget exceeded, retry" },

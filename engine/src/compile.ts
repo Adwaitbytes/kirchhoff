@@ -1,8 +1,9 @@
-import { keccak256, stringToBytes, toFunctionSelector } from "viem";
+import { keccak256, pad, stringToBytes, toFunctionSelector } from "viem";
 import { CCIP_EVENTS, CCIP_TOPICS } from "./adapters/ccip.ts";
 import { bridgeAddressMaps, emitterOn, messageIdTopic, parseBridgeEvent, type AddressMapName } from "./adapters/event.ts";
 import { bridgeForMinter, chainByAlias, confidenceOn, specChains } from "./chains.ts";
 import { MULTICALL3, eventTopic } from "./contract-events.ts";
+import { toSpecJson, type SpecJson } from "./spec-json.ts";
 import type { BridgeSpec, ChainRef, Confidence, Hex, TokenSpec } from "./types.ts";
 
 /** Per-chain deployment record written by demo/deploy-all into deployments/<network>.json. */
@@ -85,11 +86,25 @@ type DebitLookup = PairedWatch & {
   registry: { debitOf: Hex; creditOf: Hex } | null;
 };
 
+/**
+ * One CRE log trigger filter: topics[0] Transfer, then the from and to slots.
+ * An empty slot is a wildcard; slots are 32-byte padded addresses.
+ */
+export type SupplyTrigger = {
+  chain: string;
+  address: Hex;
+  /** Which supply change this side catches. */
+  side: "mint" | "burn" | "escrow_in" | "escrow_out";
+  topics: [Hex[], Hex[], Hex[]];
+};
+
 export type W1Config = {
   workflow: "w1-junction";
   token: string;
   tokenId: Hex;
   specHash: Hex;
+  /** The resolved spec, JSON-safe; revive with reviveSpec() inside the workflow. */
+  spec: SpecJson;
   chains: ChainEntry[];
   creditTriggers: PairedWatch[];
   debitLookups: DebitLookup[];
@@ -101,6 +116,8 @@ export type W2Config = {
   token: string;
   tokenId: Hex;
   specHash: Hex;
+  /** The resolved spec, JSON-safe; revive with reviveSpec() inside the workflow. */
+  spec: SpecJson;
   model: TokenSpec["model"];
   unit: TokenSpec["unit"];
   schedule: string;
@@ -109,8 +126,9 @@ export type W2Config = {
   /** Read selectors: shares instead of balances for rebasing tokens (PRD section 10). */
   reads: { supply: string; balance: string };
   escrowHolders: Hex[];
-  supplyTriggers: { chain: string; address: Hex; topic0: Hex }[];
-  debitEvents: PairedWatch[];
+  supplyTriggers: SupplyTrigger[];
+  /** `registry` set when the bridge exposes debitOf/creditOf, for credits older than the log windows. */
+  debitEvents: (PairedWatch & { registry: DebitLookup["registry"] })[];
   creditEvents: PairedWatch[];
   logQueryBlockLimit: string;
   porFeed: Hex | null;
@@ -363,6 +381,31 @@ function escrowHolders(spec: TokenSpec): Hex[] {
   return holders;
 }
 
+const ZERO_TOPIC: Hex = pad(ZERO);
+
+/**
+ * W2 supply triggers, one per side, so ordinary transfers never start an epoch
+ * (CRE caps log triggers at 10 events per 6 s). Supply moves only on mint
+ * (from zero) and burn (to zero); lock-release backing moves only on transfers
+ * into or out of the escrow holders, and the home canonical supply is not a claim.
+ */
+function supplyTriggers(spec: TokenSpec, chains: readonly ChainEntry[]): SupplyTrigger[] {
+  const transfer = [eventTopic("Transfer")];
+  const holders = escrowHolders(spec).map((h) => pad(h));
+  return chains.flatMap((c): SupplyTrigger[] => {
+    if (c.isHome && spec.model === "lock_release_home") {
+      return [
+        { chain: c.name, address: c.token, side: "escrow_in", topics: [transfer, [], holders] },
+        { chain: c.name, address: c.token, side: "escrow_out", topics: [transfer, holders, []] },
+      ];
+    }
+    return [
+      { chain: c.name, address: c.token, side: "mint", topics: [transfer, [ZERO_TOPIC], []] },
+      { chain: c.name, address: c.token, side: "burn", topics: [transfer, [], [ZERO_TOPIC]] },
+    ];
+  });
+}
+
 const NOTIFY_SECRETS = ["NOTIFY_TELEGRAM_BOT_TOKEN", "NOTIFY_TELEGRAM_CHAT_ID", "NOTIFY_SLACK_WEBHOOK_URL"];
 
 /**
@@ -386,11 +429,13 @@ export function compileWorkflows(spec: TokenSpec, deployments: Deployments, spec
   const header = { token: resolved.token, tokenId: resolved.tokenId, specHash };
   const matchWindowSeconds = resolved.rules.junction.matchWindowSeconds.toString();
   const shares = resolved.unit === "shares";
+  const specJson = toSpecJson(resolved);
 
   const configs: WorkflowConfigs = {
     "w1-junction": {
       workflow: "w1-junction",
       ...header,
+      spec: specJson,
       chains,
       creditTriggers: watches.map((w) => w.credit),
       debitLookups: watches.map((w) => w.debit),
@@ -399,6 +444,7 @@ export function compileWorkflows(spec: TokenSpec, deployments: Deployments, spec
     "w2-loop": {
       workflow: "w2-loop",
       ...header,
+      spec: specJson,
       model: resolved.model,
       unit: resolved.unit,
       schedule: "*/30 * * * * *",
@@ -408,8 +454,8 @@ export function compileWorkflows(spec: TokenSpec, deployments: Deployments, spec
         ? { supply: "getTotalShares()", balance: "sharesOf(address)" }
         : { supply: "totalSupply()", balance: "balanceOf(address)" },
       escrowHolders: escrowHolders(resolved),
-      supplyTriggers: chains.map((c) => ({ chain: c.name, address: c.token, topic0: eventTopic("Transfer") })),
-      debitEvents: watches.map(({ debit: { messageIdTopicIndex, searchWindowBlocks, registry: r, ...watch } }) => watch),
+      supplyTriggers: supplyTriggers(resolved, chains),
+      debitEvents: watches.map(({ debit: { messageIdTopicIndex, searchWindowBlocks, ...watch } }) => watch),
       creditEvents: watches.map((w) => w.credit),
       logQueryBlockLimit: CRE_LOG_QUERY_BLOCK_LIMIT.toString(),
       porFeed: resolved.reserves.porFeed,

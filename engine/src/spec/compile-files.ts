@@ -1,5 +1,6 @@
 import Ajv from "ajv";
 import { compileWorkflows, resolveSpec, type Deployments, type WorkflowName } from "../compile.ts";
+import { toSpecJson } from "../spec-json.ts";
 import { describeError } from "../types.ts";
 import { specHash } from "./hash.ts";
 import { parseSpec, schemaErrors } from "./parse.ts";
@@ -59,9 +60,9 @@ export type CompiledFiles =
   | { ok: true; files: Record<string, string>; warnings: string[] }
   | { ok: false; errors: string[]; warnings: string[] };
 
-/** Stable, reviewable JSON: two-space indent and a trailing newline. */
+/** Stable, reviewable JSON: two-space indent and a trailing newline. Configs hold no bigints by construction. */
 function pretty(value: unknown): string {
-  return `${JSON.stringify(value, (_key, v: unknown) => (typeof v === "bigint" ? v.toString() : v), 2)}\n`;
+  return `${JSON.stringify(value, null, 2)}\n`;
 }
 
 /**
@@ -97,7 +98,7 @@ export async function compileSpecDocuments(
   const compiled = compileWorkflows(spec, deployments, hash);
   if (!compiled.ok) return { ok: false, errors: compiled.errors, warnings: [] };
 
-  const files: Record<string, string> = { "spec.resolved.json": pretty({ specHash: hash, spec: compiled.spec }) };
+  const files: Record<string, string> = { "spec.resolved.json": pretty({ specHash: hash, spec: toSpecJson(compiled.spec) }) };
   for (const name of WORKFLOWS) files[`${name}/config.${target}.json`] = pretty(compiled.configs[name]);
   return { ok: true, files, warnings: [...resolved.warnings, ...compiled.warnings] };
 }

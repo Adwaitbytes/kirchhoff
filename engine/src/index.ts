@@ -26,6 +26,7 @@ export {
   type TimedCredit,
 } from "./junction.ts";
 export { loop } from "./loop.ts";
+export { reviveSpec, toSpecJson, type SpecJson } from "./spec-json.ts";
 export {
   applyCreReport,
   transition,
@@ -48,6 +49,8 @@ export {
   type ParsedMessage,
   type ProtectedTransfer,
   type ProviderPair,
+  type Read,
+  type ReadPair,
   type SourceDebitLookup,
   type SpecCacheEntry,
   type StatusRead,
@@ -78,6 +81,7 @@ export {
   type CompileResult,
   type Deployments,
   type ReadConfidence,
+  type SupplyTrigger,
   type TriggerConfidence,
   type W1Config,
   type W2Config,
