@@ -1,0 +1,65 @@
+# KIRCH-SPEC for the demo token kETH (PRD section 6). Testnet simulation.
+# Zero addresses are placeholders: engine/bin/compile.ts fills them from deployments/<network>.json.
+spec_version: 1
+token: kETH
+model: lock_release_home        # or burn_mint_multi
+unit: tokens
+home:
+  chain: ethereum-testnet-sepolia
+  canonical: "0x0000000000000000000000000000000000000000"
+  escrow: "0x0000000000000000000000000000000000000000"
+  decimals: 18
+remotes:
+  - chain: ethereum-testnet-sepolia-arbitrum-1
+    alias: arb
+    token: "0x0000000000000000000000000000000000000000"
+    minters: [ccip_pool_arb, weakbridge_arb]
+    decimals: 18
+  - chain: ethereum-testnet-sepolia-base-1
+    alias: base
+    token: "0x0000000000000000000000000000000000000000"
+    minters: [ccip_pool_base, weakbridge_base]
+    decimals: 18
+bridges:
+  - id: ccip
+    kind: ccip_v2
+    pools:
+      home: "0x0000000000000000000000000000000000000000"
+      arb: "0x0000000000000000000000000000000000000000"
+      base: "0x0000000000000000000000000000000000000000"
+    # CCIP 2.0.0: pool events carry no message id, so the ramps are needed to match by id (docs/research/ccip.md).
+    onramps:
+      home: "0x0000000000000000000000000000000000000000"
+      arb: "0x0000000000000000000000000000000000000000"
+      base: "0x0000000000000000000000000000000000000000"
+    offramps:
+      home: "0x0000000000000000000000000000000000000000"
+      arb: "0x0000000000000000000000000000000000000000"
+      base: "0x0000000000000000000000000000000000000000"
+    lockbox: "0x0000000000000000000000000000000000000000"   # ERC20LockBox behind the home lock-release pool
+  - id: weakbridge
+    kind: custom
+    # HomeEscrowAdapter on home, WeakBridge on remotes (docs/INTERFACES.md).
+    contracts:
+      home: "0x0000000000000000000000000000000000000000"
+      arb: "0x0000000000000000000000000000000000000000"
+      base: "0x0000000000000000000000000000000000000000"
+    debit_event: "Burned(bytes32 indexed id, address indexed from, address to, uint256 amount, uint64 dstChain)"
+    credit_event: "Released(bytes32 indexed id, address indexed to, uint256 amount, uint64 srcChain)"
+    search_window_blocks: 100      # CRE filterLogs limit; W1 confirms debits via debitOf()
+reserves:
+  por_feed: null                # AggregatorV3 address for backed tokens
+confidence:
+  default: finalized
+  overrides: { ethereum-testnet-sepolia-base-1: safe }
+rules:
+  junction: { match_window_seconds: 1200 }
+  loop: { tolerance_wei: "0", breach_confirmations: 1 }
+  soft:
+    flow_limit_per_hour: "50000e18"
+  staleness_seconds: 120
+  on_stale: fail_closed
+response:
+  on_broken: [freeze_ccip_lanes, taint_recipient, flip_feed, page_issuer]
+  replay_requires: issuer_multisig
+  recovery_timelock_seconds: 3600

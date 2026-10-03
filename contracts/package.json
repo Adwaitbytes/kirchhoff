@@ -1,0 +1,19 @@
+{
+  "name": "@kirchhoff/contracts",
+  "private": true,
+  "description": "KIRCHHOFF onchain suite (Foundry). Solidity deps resolved from node_modules, mirroring how Chainlink's own packages resolve them.",
+  "scripts": {
+    "build": "forge build",
+    "test": "forge test",
+    "fmt": "forge fmt",
+    "lint": "forge fmt --check"
+  },
+  "dependencies": {
+    "@chainlink/contracts": "1.5.0",
+    "@chainlink/contracts-ccip": "2.0.0",
+    "@openzeppelin/contracts": "5.3.0",
+    "@openzeppelin/contracts-4.8.3": "npm:@openzeppelin/contracts@4.8.3",
+    "@openzeppelin/contracts-5.0.2": "npm:@openzeppelin/contracts@5.0.2",
+    "forge-std": "github:foundry-rs/forge-std#v1.16.1"
+  }
+}

@@ -1,0 +1,217 @@
+{
+  "workflow": "w1-junction",
+  "token": "kETH",
+  "tokenId": "0xe7cbc0ff4035309f71987d099a88ed33ef6bfd1a7d6c1050befb12561b95eb9c",
+  "specHash": "0x1dd5bede49fb4512edc56c916ba2130dd9e6a9f9af53fb51a609f5bc8eeca11f",
+  "chains": [
+    {
+      "name": "ethereum-testnet-sepolia",
+      "selector": "16015286601757825753",
+      "chainId": 31337,
+      "alias": "home",
+      "isHome": true,
+      "confidence": "finalized",
+      "triggerConfidence": "FINALIZED",
+      "readConfidence": "finalized",
+      "decimals": 18,
+      "token": "0x0000000000000000000000000000000000001001",
+      "ledger": "0x00000000000000000000000000000000000a0001",
+      "quarantine": "0x00000000000000000000000000000000000a0002",
+      "feed": "0x00000000000000000000000000000000000a0003"
+    },
+    {
+      "name": "ethereum-testnet-sepolia-arbitrum-1",
+      "selector": "3478487238524512106",
+      "chainId": 31338,
+      "alias": "arb",
+      "isHome": false,
+      "confidence": "finalized",
+      "triggerConfidence": "FINALIZED",
+      "readConfidence": "finalized",
+      "decimals": 18,
+      "token": "0x0000000000000000000000000000000000002001",
+      "ledger": "0x00000000000000000000000000000000000b0001",
+      "quarantine": "0x00000000000000000000000000000000000b0002",
+      "feed": "0x00000000000000000000000000000000000b0003"
+    },
+    {
+      "name": "ethereum-testnet-sepolia-base-1",
+      "selector": "10344971235874465080",
+      "chainId": 31339,
+      "alias": "base",
+      "isHome": false,
+      "confidence": "safe",
+      "triggerConfidence": "SAFE",
+      "readConfidence": "finalized",
+      "decimals": 18,
+      "token": "0x0000000000000000000000000000000000003001",
+      "ledger": "0x00000000000000000000000000000000000c0001",
+      "quarantine": "0x00000000000000000000000000000000000c0002",
+      "feed": "0x00000000000000000000000000000000000c0003"
+    }
+  ],
+  "creditTriggers": [
+    {
+      "chain": "ethereum-testnet-sepolia",
+      "bridgeId": "ccip",
+      "adapter": "ccip_v2",
+      "address": "0x0000000000000000000000000000000000001005",
+      "event": "ExecutionStateChanged(uint64 indexed sourceChainSelector, uint64 indexed messageNumber, bytes32 indexed messageId, uint8 state, bytes returnData)",
+      "topic0": "0x8c324ce1367b83031769f6a813e3bb4c117aba2185789d66b98b791405be6df2",
+      "pairWith": {
+        "address": "0x0000000000000000000000000000000000001003",
+        "event": "ReleasedOrMinted(uint64 indexed remoteChainSelector, address token, address sender, address recipient, uint256 amount)",
+        "topic0": "0xfc5e3a5bddc11d92c2dc20fae6f7d5eb989f056be35239f7de7e86150609abc0"
+      }
+    },
+    {
+      "chain": "ethereum-testnet-sepolia-arbitrum-1",
+      "bridgeId": "ccip",
+      "adapter": "ccip_v2",
+      "address": "0x0000000000000000000000000000000000002005",
+      "event": "ExecutionStateChanged(uint64 indexed sourceChainSelector, uint64 indexed messageNumber, bytes32 indexed messageId, uint8 state, bytes returnData)",
+      "topic0": "0x8c324ce1367b83031769f6a813e3bb4c117aba2185789d66b98b791405be6df2",
+      "pairWith": {
+        "address": "0x0000000000000000000000000000000000002002",
+        "event": "ReleasedOrMinted(uint64 indexed remoteChainSelector, address token, address sender, address recipient, uint256 amount)",
+        "topic0": "0xfc5e3a5bddc11d92c2dc20fae6f7d5eb989f056be35239f7de7e86150609abc0"
+      }
+    },
+    {
+      "chain": "ethereum-testnet-sepolia-base-1",
+      "bridgeId": "ccip",
+      "adapter": "ccip_v2",
+      "address": "0x0000000000000000000000000000000000003005",
+      "event": "ExecutionStateChanged(uint64 indexed sourceChainSelector, uint64 indexed messageNumber, bytes32 indexed messageId, uint8 state, bytes returnData)",
+      "topic0": "0x8c324ce1367b83031769f6a813e3bb4c117aba2185789d66b98b791405be6df2",
+      "pairWith": {
+        "address": "0x0000000000000000000000000000000000003002",
+        "event": "ReleasedOrMinted(uint64 indexed remoteChainSelector, address token, address sender, address recipient, uint256 amount)",
+        "topic0": "0xfc5e3a5bddc11d92c2dc20fae6f7d5eb989f056be35239f7de7e86150609abc0"
+      }
+    },
+    {
+      "chain": "ethereum-testnet-sepolia",
+      "bridgeId": "weakbridge",
+      "adapter": "weakbridge",
+      "address": "0x0000000000000000000000000000000000001002",
+      "pairWith": null,
+      "event": "Released(bytes32 indexed id, address indexed to, uint256 amount, uint64 srcChain)",
+      "topic0": "0x86bc3a00208f627e9bf9b1c094ac7526d691bdadc61ac5622cd56b75e8ec4ad0"
+    },
+    {
+      "chain": "ethereum-testnet-sepolia-arbitrum-1",
+      "bridgeId": "weakbridge",
+      "adapter": "weakbridge",
+      "address": "0x0000000000000000000000000000000000002003",
+      "pairWith": null,
+      "event": "Released(bytes32 indexed id, address indexed to, uint256 amount, uint64 srcChain)",
+      "topic0": "0x86bc3a00208f627e9bf9b1c094ac7526d691bdadc61ac5622cd56b75e8ec4ad0"
+    },
+    {
+      "chain": "ethereum-testnet-sepolia-base-1",
+      "bridgeId": "weakbridge",
+      "adapter": "weakbridge",
+      "address": "0x0000000000000000000000000000000000003003",
+      "pairWith": null,
+      "event": "Released(bytes32 indexed id, address indexed to, uint256 amount, uint64 srcChain)",
+      "topic0": "0x86bc3a00208f627e9bf9b1c094ac7526d691bdadc61ac5622cd56b75e8ec4ad0"
+    }
+  ],
+  "debitLookups": [
+    {
+      "chain": "ethereum-testnet-sepolia",
+      "bridgeId": "ccip",
+      "adapter": "ccip_v2",
+      "address": "0x0000000000000000000000000000000000001004",
+      "event": "CCIPMessageSent(uint64 indexed destChainSelector, address indexed sender, bytes32 indexed messageId, address feeToken, uint256 tokenAmountBeforeTokenPoolFees, bytes encodedMessage, (address issuer, uint32 destGasLimit, uint32 destBytesOverhead, uint256 feeTokenAmount, bytes extraArgs)[] receipts, bytes[] verifierBlobs)",
+      "topic0": "0x371bc2ff0a006f4ef863b1d27a065d4e9f938b6d883eb154572b4aea593b32cc",
+      "pairWith": {
+        "address": "0x0000000000000000000000000000000000001003",
+        "event": "LockedOrBurned(uint64 indexed remoteChainSelector, address token, address sender, uint256 amount)",
+        "topic0": "0xf33bc26b4413b0e7f19f1ea739fdf99098c0061f1f87d954b11f5293fad9ae10"
+      },
+      "messageIdTopicIndex": 3,
+      "searchWindowBlocks": "100",
+      "registry": null
+    },
+    {
+      "chain": "ethereum-testnet-sepolia-arbitrum-1",
+      "bridgeId": "ccip",
+      "adapter": "ccip_v2",
+      "address": "0x0000000000000000000000000000000000002004",
+      "event": "CCIPMessageSent(uint64 indexed destChainSelector, address indexed sender, bytes32 indexed messageId, address feeToken, uint256 tokenAmountBeforeTokenPoolFees, bytes encodedMessage, (address issuer, uint32 destGasLimit, uint32 destBytesOverhead, uint256 feeTokenAmount, bytes extraArgs)[] receipts, bytes[] verifierBlobs)",
+      "topic0": "0x371bc2ff0a006f4ef863b1d27a065d4e9f938b6d883eb154572b4aea593b32cc",
+      "pairWith": {
+        "address": "0x0000000000000000000000000000000000002002",
+        "event": "LockedOrBurned(uint64 indexed remoteChainSelector, address token, address sender, uint256 amount)",
+        "topic0": "0xf33bc26b4413b0e7f19f1ea739fdf99098c0061f1f87d954b11f5293fad9ae10"
+      },
+      "messageIdTopicIndex": 3,
+      "searchWindowBlocks": "100",
+      "registry": null
+    },
+    {
+      "chain": "ethereum-testnet-sepolia-base-1",
+      "bridgeId": "ccip",
+      "adapter": "ccip_v2",
+      "address": "0x0000000000000000000000000000000000003004",
+      "event": "CCIPMessageSent(uint64 indexed destChainSelector, address indexed sender, bytes32 indexed messageId, address feeToken, uint256 tokenAmountBeforeTokenPoolFees, bytes encodedMessage, (address issuer, uint32 destGasLimit, uint32 destBytesOverhead, uint256 feeTokenAmount, bytes extraArgs)[] receipts, bytes[] verifierBlobs)",
+      "topic0": "0x371bc2ff0a006f4ef863b1d27a065d4e9f938b6d883eb154572b4aea593b32cc",
+      "pairWith": {
+        "address": "0x0000000000000000000000000000000000003002",
+        "event": "LockedOrBurned(uint64 indexed remoteChainSelector, address token, address sender, uint256 amount)",
+        "topic0": "0xf33bc26b4413b0e7f19f1ea739fdf99098c0061f1f87d954b11f5293fad9ae10"
+      },
+      "messageIdTopicIndex": 3,
+      "searchWindowBlocks": "100",
+      "registry": null
+    },
+    {
+      "chain": "ethereum-testnet-sepolia",
+      "bridgeId": "weakbridge",
+      "adapter": "weakbridge",
+      "address": "0x0000000000000000000000000000000000001002",
+      "pairWith": null,
+      "event": "Burned(bytes32 indexed id, address indexed from, address to, uint256 amount, uint64 dstChain)",
+      "topic0": "0x9021afc33589d1bf01da544eaf0efceb271cb27fb5db2d8f0d875b6579c247e8",
+      "messageIdTopicIndex": 1,
+      "searchWindowBlocks": "100",
+      "registry": {
+        "debitOf": "0xb4b71ba5",
+        "creditOf": "0xb7cc5c28"
+      }
+    },
+    {
+      "chain": "ethereum-testnet-sepolia-arbitrum-1",
+      "bridgeId": "weakbridge",
+      "adapter": "weakbridge",
+      "address": "0x0000000000000000000000000000000000002003",
+      "pairWith": null,
+      "event": "Burned(bytes32 indexed id, address indexed from, address to, uint256 amount, uint64 dstChain)",
+      "topic0": "0x9021afc33589d1bf01da544eaf0efceb271cb27fb5db2d8f0d875b6579c247e8",
+      "messageIdTopicIndex": 1,
+      "searchWindowBlocks": "100",
+      "registry": {
+        "debitOf": "0xb4b71ba5",
+        "creditOf": "0xb7cc5c28"
+      }
+    },
+    {
+      "chain": "ethereum-testnet-sepolia-base-1",
+      "bridgeId": "weakbridge",
+      "adapter": "weakbridge",
+      "address": "0x0000000000000000000000000000000000003003",
+      "pairWith": null,
+      "event": "Burned(bytes32 indexed id, address indexed from, address to, uint256 amount, uint64 dstChain)",
+      "topic0": "0x9021afc33589d1bf01da544eaf0efceb271cb27fb5db2d8f0d875b6579c247e8",
+      "messageIdTopicIndex": 1,
+      "searchWindowBlocks": "100",
+      "registry": {
+        "debitOf": "0xb4b71ba5",
+        "creditOf": "0xb7cc5c28"
+      }
+    }
+  ],
+  "matchWindowSeconds": "1200"
+}

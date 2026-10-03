@@ -1,0 +1,15 @@
+packages:
+  - engine
+  - workflows
+  - judge
+  - indexer
+  - api
+  - ai
+  - mcp
+  - sdk
+  - web
+  - demo
+allowBuilds:
+  core-js: false
+  unrs-resolver: false
+  esbuild: false

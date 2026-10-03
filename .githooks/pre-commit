@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Blocks commits that leak secrets or break lint, typecheck or tests.
+set -euo pipefail
+export PATH="$HOME/.foundry/bin:$PATH"
+
+if git diff --cached --name-only | grep -E '(^|/)\.env($|\.)' | grep -v '\.env\.example$'; then
+  echo "pre-commit: refusing to commit an .env file" >&2; exit 1
+fi
+# Exact-match every secret value in .env against the staged diff, so test fixtures with hashes never false-alarm.
+if [ -f .env ]; then
+  staged="$(git diff --cached -U0)"
+  while IFS='=' read -r name value; do
+    case "$name" in *PRIVATE_KEY|*SECRET|*TOKEN|*API_KEY|*WEBHOOK_URL|DATABASE_URL*)
+      v="${value#0x}"
+      if [ ${#v} -ge 16 ] && grep -qF "$v" <<<"$staged"; then echo "pre-commit: staged diff contains the value of $name" >&2; exit 1; fi;;
+    esac
+  done < <(grep -E '^[A-Z0-9_]+=.+' .env)
+fi
+# Only gate the packages that have staged changes, so a half-built sibling never blocks a green one.
+pkgs="$(git diff --cached --name-only | awk -F/ '{print $1"/"$2" "$1}' | while read -r two one; do
+  if [ -f "$two/package.json" ] && [ "$one" = "workflows" ]; then echo "$one"; elif [ -f "$one/package.json" ]; then echo "$one"; fi
+done | sort -u)"
+for dir in $pkgs; do
+  for task in lint typecheck test; do
+    if node -e "process.exit(require('./$dir/package.json').scripts?.['$task'] ? 0 : 1)"; then
+      (cd "$dir" && pnpm run -s "$task")
+    fi
+  done
+done
+if git diff --cached --name-only | grep -q '^contracts/'; then (cd contracts && forge fmt --check && forge test -q); fi

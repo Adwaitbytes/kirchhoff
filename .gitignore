@@ -1,0 +1,19 @@
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+coverage/
+.next/
+.turbo/
+contracts/out/
+contracts/cache/
+contracts/broadcast/*/31337/
+.DS_Store
+*.log
+docs/KIRCHHOFF PRD Conservation Verifier for Cross-Chain Value.md
+docs/Pasted*
+media/raw/
+.vercel
+.anvil/
+.playwright-mcp/
