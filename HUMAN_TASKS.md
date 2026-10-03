@@ -26,6 +26,7 @@ Only a person can do these. Everything else is automated.
 ## Registration and access
 
 - [ ] CCV testnet registration for kETH lanes, if mentors confirm a path. Until it is confirmed, Fallback B (KirchhoffTokenPool) is the primary enforcement path, and the README and deck say so.
+  - [ ] Optional: email `clusersupport@smartcontract.com` to onboard our aggregator to the CCIP indexer (display name, website, contact, resolver address and chains, aggregator URLs). Not self-serve and undersized committees are refused; without it we self-execute with `ccip-cli manual-exec`. Everything else in ccv/STATUS.md is automated.
 - [ ] CRE live deploy access. Until it is granted, the workflows run with `cre workflow simulate` against public testnets, labeled as such.
 
 ## Submission (PRD section 15)

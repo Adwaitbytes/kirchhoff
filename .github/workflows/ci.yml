@@ -15,6 +15,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: No AI in the veto path (PRD section 11)
+        run: bash scripts/no-ai-in-veto-path.sh
       - run: pnpm -r lint
       - run: pnpm -r typecheck
       - run: pnpm -r test

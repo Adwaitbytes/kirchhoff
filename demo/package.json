@@ -1,0 +1,31 @@
+{
+  "name": "@kirchhoff/demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "KIRCHHOFF testnet simulation tooling: deploy-all, seed (Flow A), Kelp Replay attack (Flow B), reset and the end-to-end harness",
+  "scripts": {
+    "deploy-all": "tsx deploy-all.ts",
+    "seed": "tsx seed.ts",
+    "attack": "tsx attack-kelp-replay.ts",
+    "reset": "tsx reset.ts",
+    "e2e": "tsx e2e.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@kirchhoff/engine": "workspace:*",
+    "ajv": "^8.20.0",
+    "viem": "^2.57.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.19.1",
+    "eslint": "^10.12.0",
+    "tsx": "^4.20.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.3"
+  }
+}

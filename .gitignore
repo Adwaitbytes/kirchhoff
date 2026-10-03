@@ -8,7 +8,6 @@ coverage/
 .turbo/
 contracts/out/
 contracts/cache/
-contracts/broadcast/*/31337/
 .DS_Store
 *.log
 docs/KIRCHHOFF PRD Conservation Verifier for Cross-Chain Value.md
@@ -17,3 +16,7 @@ media/raw/
 .vercel
 .anvil/
 .playwright-mcp/
+api/api/
+deployments/local*
+deployments/wfs*
+contracts/broadcast/
