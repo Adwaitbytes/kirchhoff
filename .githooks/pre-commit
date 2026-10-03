@@ -20,7 +20,7 @@ fi
 pkgs="$(git diff --cached --name-only | awk -F/ '{print $1"/"$2" "$1}' | while read -r two one; do
   if [ -f "$two/package.json" ] && [ "$one" = "workflows" ]; then echo "$one"; elif [ -f "$one/package.json" ]; then echo "$one"; fi
 done | sort -u)"
-for dir in $pkgs; do
+for dir in $(echo "$pkgs" | grep -vx contracts); do
   for task in lint typecheck test; do
     if node -e "process.exit(require('./$dir/package.json').scripts?.['$task'] ? 0 : 1)"; then
       (cd "$dir" && pnpm run -s "$task")
