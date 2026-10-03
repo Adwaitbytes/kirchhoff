@@ -1,0 +1,127 @@
+# KIRCHHOFF CCV cell 1. Helm values for the ccv-cell chart v0.8.0
+# (github.com/smartcontractkit/chainlink-ccv-starter-kit, tag v0.8.0, path charts/ccv-cell).
+#
+# Install:  helm upgrade --install kh-cell-1 <starter-kit>/charts/ccv-cell -n kirchhoff -f ccv/values/cell-1.yaml
+# Every secret below is an `existingSecret` created by ccv/scripts/up.sh (testnet-only shortcut: plain
+# Kubernetes Secrets instead of a cloud secret manager or KMS; labeled as such in ccv/STATUS.md).
+#
+# PLACEHOLDERS (see ccv/STATUS.md "What is missing"):
+#   0x000000000000000000000000000000000000cc01  KIRCHHOFF VersionedVerifierResolver. Not deployed yet. The resolver
+#                                               is CREATE2-deployed at the same address on every chain by the
+#                                               on-chain kit (chainlink-ccv-starter-kit-contracts). Replace all
+#                                               occurrences once `make deploy-verifier` has run on the 3 chains.
+#   aggregator signers                          Filled from the verifier's first-boot log line "Using signer
+#                                               address" by ccv/scripts/up.sh into cell-1.signer.yaml.
+
+aggregator:
+  config:
+    aggregatorID: "kirchhoff-aggregator-1"
+    clients:
+      # One client per verifier that writes to this aggregator. With 4 cells, add kirchhoff-cell-2..4 here and
+      # give each pair its own api_key/secret_key (RUNBOOK.md "committee" key matrix).
+      - clientId: kirchhoff-cell-1
+        groups: ["default"]
+        enabled: true
+    committee:
+      # Keyed by SOURCE chain selector. Threshold 1 while this is a 1-cell committee; a 4-cell committee uses
+      # threshold 3 with all four signers listed (ccv/README.md "Scale to a 4-cell committee").
+      quorumConfigs:
+        "16015286601757825753":
+          sourceVerifierAddress: "0x000000000000000000000000000000000000cc01"
+          threshold: 1
+          signers:
+            - address: "0x0000000000000000000000000000000000005191"
+        "3478487238524512106":
+          sourceVerifierAddress: "0x000000000000000000000000000000000000cc01"
+          threshold: 1
+          signers:
+            - address: "0x0000000000000000000000000000000000005191"
+        "10344971235874465080":
+          sourceVerifierAddress: "0x000000000000000000000000000000000000cc01"
+          threshold: 1
+          signers:
+            - address: "0x0000000000000000000000000000000000005191"
+      # Keyed by DESTINATION chain selector.
+      destinationVerifiers:
+        "16015286601757825753": "0x000000000000000000000000000000000000cc01"
+        "3478487238524512106": "0x000000000000000000000000000000000000cc01"
+        "10344971235874465080": "0x000000000000000000000000000000000000cc01"
+  secrets:
+    app:
+      type: existingSecret
+      existingSecret:
+        name: kh-cell-1-aggregator-app
+        key: secrets.toml
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+verifier:
+  config:
+    verifier_id: "kirchhoff-cell-1"
+    signer_address: "auto"
+    aggregators:
+      - name: aggregator-1
+        secret_name: aggregator_1
+        useInClusterAggregator: true
+    # Our resolver, per chain. Paired with on_ramp_addresses: a chain needs both to be watched.
+    committee_verifier_addresses:
+      "16015286601757825753": "0x000000000000000000000000000000000000cc01"
+      "3478487238524512106": "0x000000000000000000000000000000000000cc01"
+      "10344971235874465080": "0x000000000000000000000000000000000000cc01"
+    # OnRamp 2.0.0 per chain, verified live with typeAndVersion() (docs/research/ccip.md section 1).
+    on_ramp_addresses:
+      "16015286601757825753": "0x8dcf17f298c881A547D91ca4aA3C2AD7568C6777"
+      "3478487238524512106": "0x6B9a7cF69F90Ae2659bfe3069fba5Aa308A48cC4"
+      "10344971235874465080": "0xA33b221A8427739c76f631a995ca60544bEdD632"
+    # rmn_remote_addresses is deprecated upstream: the verifier derives the RMN Remote from each OnRamp's
+    # static config. default_executor_on_ramp_addresses stays empty so this cell only verifies messages that
+    # name the KIRCHHOFF resolver in their CCV set.
+    #
+    # The Judge. In-cluster plain HTTP, so insecure_connection is required (the hook rejects non-https otherwise).
+    # require_auth is false: chart v0.8.0 does not template the [policy_hook] HMAC credential. With the
+    # existingSecret type used here the credential CAN be added to the verifier secrets file by hand; ccv/scripts/up.sh
+    # does that when JUDGE_AUTH=hmac (then set require_auth: true). Default is the in-cluster, unauthenticated
+    # Judge behind a NetworkPolicy, as Chainlink's docs recommend.
+    policy_hook:
+      base_url: "http://judge.kirchhoff.svc.cluster.local:8080"
+      request_timeout: "5s"
+      retry_delay: "10s"
+      insecure_connection: true
+      require_auth: false
+  # bootstrap.config.chains stays empty (chart default): it only drives signing-key sync to a Job Distributor,
+  # which a standalone cell does not use (same as the starter kit's local/config/verifier-bootstrap-config.toml).
+  # RPC URLs live in the existingSecret kh-cell-1-verifier-evm (rendered from .env RPC_*_1 by up.sh), so this
+  # tree only documents the shape; the chart mounts the secret instead of rendering it.
+  evm:
+    config:
+      chains: {}
+  secrets:
+    app:
+      type: existingSecret
+      existingSecret:
+        name: kh-cell-1-verifier-app
+        key: secrets.toml
+    bootstrap:
+      type: existingSecret
+      existingSecret:
+        name: kh-cell-1-verifier-bootstrap
+        key: secrets.toml
+    evm:
+      type: existingSecret
+      existingSecret:
+        name: kh-cell-1-verifier-evm
+        key: secrets.toml
+  podLabels:
+    kirchhoff.xyz/role: ccv-verifier
+  # 512Mi was OOMKilled within 1s of boot while the keystore unlocked (observed on v0.13.0); 2Gi is the chart's
+  # own example pod limit.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 2Gi

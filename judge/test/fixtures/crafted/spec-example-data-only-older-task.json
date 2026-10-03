@@ -1,0 +1,29 @@
+{
+  "schema_version": "v1",
+  "verifier_id": "acme-verifier-1",
+  "message_id": "0x9f2b1c0d5e4a3b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4",
+  "source_tx_hash": "0x4c0f2a9b8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c5b4a3928170605f4e3",
+  "source_block_number": 1837421,
+  "finalized_block_number": 1837436,
+  "block_depth": 15,
+  "message": {
+    "version": 1,
+    "source_chain_selector": "3379446385462418246",
+    "dest_chain_selector": "12922642891491394802",
+    "sequence_number": 42,
+    "on_ramp_address": "0x000000000000000000000000a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "off_ramp_address": "0x000000000000000000000000b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "sender": "0x000000000000000000000000c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+    "receiver": "0x000000000000000000000000d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+    "data": "0x68656c6c6f",
+    "dest_blob": "0x",
+    "execution_gas_limit": 0,
+    "ccip_receive_gas_limit": 200000,
+    "finality": {
+      "mode": "finalized",
+      "block_depth": 0,
+      "safe": false
+    },
+    "ccv_and_executor_hash": "0x5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e"
+  }
+}

@@ -1,0 +1,11 @@
+**
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!tsconfig.base.json
+!engine/package.json
+!engine/src/**
+!engine/specs/**
+!judge/package.json
+!judge/src/**
+!judge/openapi/**

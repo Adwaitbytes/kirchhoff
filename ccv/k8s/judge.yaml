@@ -1,0 +1,135 @@
+# The KIRCHHOFF Judge (CCV policy hook, @kirchhoff/judge) as its own Deployment, which is what Chainlink's
+# RUNBOOK recommends over a verifier sidecar. Every cell's verifier calls
+# http://judge.kirchhoff.svc.cluster.local:8080/v1/evaluate.
+#
+# Inputs:
+#   Secret    judge-env     RPC_{ETH,ARB,BASE}_SEPOLIA_{1,2} and JUDGE_* (created by ccv/scripts/up.sh from .env)
+#   ConfigMap judge-config  spec.yaml (KIRCH-SPEC) and deployments.json (created by ccv/scripts/judge-deploy.sh)
+#
+# The Judge is stateless apart from its 60s spec cache, so replicas can scale freely. In production each cell
+# runs its own Judge with its own RPC providers; this local cluster shares one between the cells.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: judge
+  namespace: kirchhoff
+  labels:
+    app.kubernetes.io/name: judge
+    app.kubernetes.io/part-of: kirchhoff
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: judge
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: judge
+        app.kubernetes.io/part-of: kirchhoff
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: judge
+          image: kirchhoff/judge:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: JUDGE_PORT
+              value: "8080"
+            # Matches the verifier's policy_hook.require_auth=false (chart v0.8.0 does not template the HMAC
+            # credential). Switch to hmac together with JUDGE_AUTH=hmac in ccv/scripts/up.sh.
+            - name: JUDGE_AUTH_MODE
+              value: insecure
+            - name: JUDGE_SPEC_PATH
+              value: /etc/judge/spec.yaml
+            - name: JUDGE_DEPLOYMENTS_PATH
+              value: /etc/judge/deployments.json
+          envFrom:
+            - secretRef:
+                name: judge-env
+          # Ready only once the registry spec hash is synced through both providers; until then the verifier's
+          # calls are refused and retried, the same outcome as the Judge's own 503.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 384Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/judge
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: judge-config
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: judge
+  namespace: kirchhoff
+  labels:
+    app.kubernetes.io/name: judge
+spec:
+  selector:
+    app.kubernetes.io/name: judge
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+# Only the cells' verifier pods (podLabels kirchhoff.xyz/role=ccv-verifier in ccv/values/cell-N.yaml) and pods
+# explicitly labeled as Judge clients (smoke tests, Prometheus) may reach the Judge. Unauthenticated mode is only
+# acceptable because of this policy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: judge-ingress
+  namespace: kirchhoff
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: judge
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              kirchhoff.xyz/role: ccv-verifier
+        - podSelector:
+            matchLabels:
+              kirchhoff.xyz/role: judge-client
+      ports:
+        - port: 8080
+          protocol: TCP
