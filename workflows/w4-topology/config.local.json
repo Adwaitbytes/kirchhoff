@@ -1,0 +1,70 @@
+{
+  "workflow": "w4-topology",
+  "token": "kETH",
+  "tokenId": "0xe7cbc0ff4035309f71987d099a88ed33ef6bfd1a7d6c1050befb12561b95eb9c",
+  "specHash": "0xf32d30164282acb9f4d04b856ef1adcd639c5ba2eac7e57fc7a8783abcb28739",
+  "schedule": "0 */10 * * * *",
+  "registry": {
+    "chain": "ethereum-testnet-sepolia",
+    "address": "0x2810073728C4684b2942a7456DE35C5032682a0B",
+    "specActivatedTopic0": "0xf913cd77a23bc3e2b165b27586cbd5e5b8592ed1e8b38acc254c923e9a4424bc"
+  },
+  "roleGrantedTopic0": "0x2f8788117e7eff1d82e926ec794901d17c78024a50270940304540a733656f0d",
+  "minterRole": "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6",
+  "chains": [
+    {
+      "name": "ethereum-testnet-sepolia",
+      "selector": "16015286601757825753",
+      "chainId": 31337,
+      "alias": "home",
+      "isHome": true,
+      "confidence": "finalized",
+      "triggerConfidence": "FINALIZED",
+      "readConfidence": "finalized",
+      "decimals": 18,
+      "token": "0xA4B9205C0d8a123c23dDC0A88F0B5102540B6C76",
+      "ledger": "0xaaDD98CCB028829E8D84A5b02434F28374FCD1C4",
+      "quarantine": "0x0508C02A09164e28E87e85339843200E6C8d0758",
+      "feed": "0x389Bd132330d7E78f0a773B65bD6465C2C709e21",
+      "expectedMinters": []
+    },
+    {
+      "name": "ethereum-testnet-sepolia-arbitrum-1",
+      "selector": "3478487238524512106",
+      "chainId": 31338,
+      "alias": "arb",
+      "isHome": false,
+      "confidence": "finalized",
+      "triggerConfidence": "FINALIZED",
+      "readConfidence": "finalized",
+      "decimals": 18,
+      "token": "0x6d14DE3668922634B4b7Ed2458d680D3bF621FB9",
+      "ledger": "0x2562c2397498636998a3906205A52aC8491F8549",
+      "quarantine": "0xE8Ca89C4Bd59A1033D796C981632F7651EaEca51",
+      "feed": "0x683A37BAdB98DC3934d1cdaFBa6a547D2EcBDE5a",
+      "expectedMinters": [
+        "0xEace7CCaF9dC6BBe7F2f0A4113766Bba14f3A8d1",
+        "0x3070b265A3BC4C5B42699A547Bd1BCe734a6c48a"
+      ]
+    },
+    {
+      "name": "ethereum-testnet-sepolia-base-1",
+      "selector": "10344971235874465080",
+      "chainId": 31339,
+      "alias": "base",
+      "isHome": false,
+      "confidence": "safe",
+      "triggerConfidence": "SAFE",
+      "readConfidence": "finalized",
+      "decimals": 18,
+      "token": "0xE7F2f5c128b4e93C585d73e8D78019C6e1858486",
+      "ledger": "0x0852D1a192bffA126d6cF48673fDa666BEDD3874",
+      "quarantine": "0x0cb461FD4E50DA43051421b5F22398f3FcaE6a9f",
+      "feed": "0xD3000Dd42c10dcbc695d84D3e404aaF19638a005",
+      "expectedMinters": [
+        "0x58Eb035D2dD89218052Cac28EcF0b874aD0B859c",
+        "0x83A5BE05c486160B0F027e50E3dE10F58282513B"
+      ]
+    }
+  ]
+}

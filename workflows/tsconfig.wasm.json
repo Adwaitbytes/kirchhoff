@@ -1,0 +1,13 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "sourceMap": false,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "lib": ["ESNext"],
+    "types": []
+  },
+  "include": ["src", "w1-junction/main.ts", "w2-loop/main.ts", "w3-responder/main.ts", "w4-topology/main.ts"]
+}

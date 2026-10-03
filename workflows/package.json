@@ -1,0 +1,29 @@
+{
+  "name": "@kirchhoff/workflows",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "KIRCHHOFF Conservation Engine: the four CRE TypeScript workflows (W1 Junction Watch, W2 Loop Ledger, W3 Responder, W4 Topology Watch)",
+  "scripts": {
+    "gen-config": "node scripts/gen-config.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.wasm.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "build:wasm": "node scripts/build-wasm.ts",
+    "scenarios": "node scripts/scenarios.ts"
+  },
+  "dependencies": {
+    "@chainlink/cre-sdk": "1.23.0",
+    "@kirchhoff/engine": "workspace:*",
+    "viem": "^2.57.2",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.19.1",
+    "eslint": "^10.12.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.3"
+  }
+}
