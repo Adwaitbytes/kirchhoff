@@ -17,7 +17,8 @@
   "dependencies": {
     "@kirchhoff/engine": "workspace:*",
     "ajv": "^8.20.0",
-    "viem": "^2.57.2"
+    "viem": "^2.57.2",
+    "@kirchhoff/workflows": "workspace:*"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
