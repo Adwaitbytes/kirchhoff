@@ -15,7 +15,7 @@ export type ChainDeployment = {
   /** Home chain only. */
   registry?: Hex;
   /** CCIP 2.0.0 ramps on this chain (one OnRamp and one OffRamp serve every lane). */
-  ccip?: { onRamp: Hex; offRamp: Hex };
+  ccip?: { onRamp: Hex; offRamp: Hex; tokenAdminRegistry?: Hex };
   tokens: Readonly<
     Record<
       string,
@@ -161,7 +161,17 @@ export type W4Config = {
   registry: { chain: string; address: Hex; specActivatedTopic0: Hex };
   roleGrantedTopic0: Hex;
   minterRole: Hex;
-  chains: (ChainEntry & { expectedMinters: Hex[] })[];
+  /** The resolved spec, JSON-safe; W4 compares its hash with the registry and its pools with CCIP. */
+  spec: SpecJson;
+  chains: (ChainEntry & {
+    expectedMinters: Hex[];
+    /** The spec's CCIP pools on this chain, one per ccip_v2 bridge that has a pool here. */
+    ccipPools: Hex[];
+    /** CCIP TokenAdminRegistry from deployments; null where none is deployed (Anvil). */
+    tokenAdminRegistry: Hex | null;
+  })[];
+  /** CRE secret names for paging the issuer on DRIFT, as in W3Config; values never appear in config. */
+  notifySecrets: string[];
 };
 
 export type WorkflowConfigs = {
@@ -430,6 +440,7 @@ export function compileWorkflows(spec: TokenSpec, deployments: Deployments, spec
   const matchWindowSeconds = resolved.rules.junction.matchWindowSeconds.toString();
   const shares = resolved.unit === "shares";
   const specJson = toSpecJson(resolved);
+  const notifySecrets = resolved.response.onBroken.includes("page_issuer") ? NOTIFY_SECRETS : [];
 
   const configs: WorkflowConfigs = {
     "w1-junction": {
@@ -477,7 +488,7 @@ export function compileWorkflows(spec: TokenSpec, deployments: Deployments, spec
       },
       chains,
       onBroken: resolved.response.onBroken,
-      notifySecrets: resolved.response.onBroken.includes("page_issuer") ? NOTIFY_SECRETS : [],
+      notifySecrets,
     },
     "w4-topology": {
       workflow: "w4-topology",
@@ -490,7 +501,17 @@ export function compileWorkflows(spec: TokenSpec, deployments: Deployments, spec
       },
       roleGrantedTopic0: eventTopic("RoleGranted"),
       minterRole: keccak256(stringToBytes("MINTER_ROLE")),
-      chains: entries.map(({ entry, minters }) => ({ ...entry, expectedMinters: minters })),
+      spec: specJson,
+      chains: entries.map(({ ref, entry, minters }) => ({
+        ...entry,
+        expectedMinters: minters,
+        ccipPools: resolved.bridges.flatMap((b) => {
+          const pool = b.kind === "ccip_v2" ? b.pools[ref.alias] : undefined;
+          return pool === undefined ? [] : [pool];
+        }),
+        tokenAdminRegistry: deployments.chains[ref.name]?.ccip?.tokenAdminRegistry ?? null,
+      })),
+      notifySecrets,
     },
   };
   return { ok: true, spec: resolved, specHash, configs, warnings };

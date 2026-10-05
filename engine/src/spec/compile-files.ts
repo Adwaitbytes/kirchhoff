@@ -30,7 +30,7 @@ export const DEPLOYMENTS_SCHEMA = {
             type: "object",
             additionalProperties: false,
             required: ["onRamp", "offRamp"],
-            properties: { onRamp: address, offRamp: address },
+            properties: { onRamp: address, offRamp: address, tokenAdminRegistry: address },
           },
           tokens: {
             type: "object",

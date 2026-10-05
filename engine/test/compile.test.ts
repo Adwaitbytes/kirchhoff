@@ -199,6 +199,34 @@ describe("W2 supply triggers and registry flags (workflows R3, R6)", () => {
   });
 });
 
+describe("W4 config (workflows R8)", () => {
+  it("carries the spec, CCIP pools and TokenAdminRegistry per chain, and the notify secrets", () => {
+    const r = compileWorkflows(makeSpec(), DEPLOYMENTS, hash("h"));
+    if (!r.ok) throw new Error(r.errors.join("\n"));
+    const w4 = r.configs["w4-topology"];
+    expect(reviveSpec(w4.spec)).toEqual(r.spec);
+    expect(w4.chains.map((c) => [c.alias, c.ccipPools, c.tokenAdminRegistry])).toEqual([
+      ["home", [addr(0x1003)], addr(0x1007)],
+      ["arb", [addr(0x2002)], null],
+      ["base", [addr(0x3002)], null],
+    ]);
+    expect(w4.notifySecrets).toEqual(r.configs["w3-responder"].notifySecrets);
+    expect(w4.notifySecrets).toHaveLength(3);
+  });
+
+  it("lists no CCIP pools on a chain whose bridge has none", () => {
+    const spec = makeSpec();
+    const noArbPool: TokenSpec = {
+      ...spec,
+      bridges: spec.bridges.map((b) => (b.kind === "ccip_v2" ? { ...b, pools: { home: addr(0x1003), base: addr(0x3002) } } : b)),
+      remotes: spec.remotes.map((rm) => ({ ...rm, minters: rm.minters.filter((m) => !m.startsWith("ccip")) })),
+    };
+    const r = compileWorkflows(noArbPool, DEPLOYMENTS, hash("h"));
+    if (!r.ok) throw new Error(r.errors.join("\n"));
+    expect(r.configs["w4-topology"].chains[1]?.ccipPools).toEqual([]);
+  });
+});
+
 describe("creConfidence", () => {
   it("maps spec confidence to CRE trigger and read levels", () => {
     expect(creConfidence("latest")).toEqual({ trigger: "LATEST", read: "latest" });
