@@ -216,9 +216,10 @@ export function IncidentReplayButton({ token, activeIncidentId, decimals }: { to
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button size="sm" variant="secondary" disabled={!id} onClick={() => setOpen(true)} title={id ? undefined : "No incident recorded yet"} data-testid="replay-last-incident">
+      <Button size="sm" variant="secondary" disabled={!id} onClick={() => setOpen(true)} title={id ? undefined : "No incident recorded yet"} data-testid="replay-last-incident" aria-label="Replay last incident">
         <History aria-hidden="true" />
-        <span className="hidden lg:inline">Replay last incident</span>
+        {/* Sized by the top bar (an @container): beside the Attack Lab the bar is too narrow for the label. */}
+        <span className="hidden @min-[1500px]:inline">Replay last incident</span>
       </Button>
       <Sheet open={open && id !== null} onOpenChange={setOpen}>
         {id ? (

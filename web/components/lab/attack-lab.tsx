@@ -99,7 +99,7 @@ function StepTracker({ run }: { run: LabRun | null }) {
                 {copy.title}
                 <span className="sr-only">, {st.state}</span>
               </p>
-              {st.state !== "pending" ? <p className="mt-0.5 text-xs leading-relaxed text-muted">{st.note ?? copy.detail}</p> : <p className="sr-only">{copy.detail}</p>}
+              {st.state !== "pending" ? <p className="mt-0.5 text-xs leading-relaxed text-muted [overflow-wrap:anywhere]">{st.note ?? copy.detail}</p> : <p className="sr-only">{copy.detail}</p>}
               {st.txs.length > 0 || st.messageId ? (
                 <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
                   {st.txs.map((tx) => (
@@ -131,7 +131,7 @@ function ConsoleLineView({ line }: { line: LabConsoleLine }) {
       <span className={cn(line.stream === "cmd" ? "text-conserved" : cls)} aria-hidden="true">
         {prefix}
       </span>
-      <span className={cn("min-w-0 break-words", cls)}>
+      <span className={cn("min-w-0 [overflow-wrap:anywhere]", cls)}>
         {line.text}
         {line.tx ? (
           <a href={txRefUrl(line.tx)} target="_blank" rel="noopener noreferrer" className="ml-2 text-subtle underline decoration-dotted underline-offset-2 hover:text-fg">

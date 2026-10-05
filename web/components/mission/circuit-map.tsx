@@ -280,7 +280,7 @@ const WireEdge = memo(function WireEdge({ id, data }: EdgeProps<WireEdgeT>) {
   // so they stay legible and meet the 24px target size.
   const zoom = useStore(zoomSelector);
   if (!data) return null;
-  const chipScale = zoom < 1 ? 1 / zoom : 1;
+  const chipScale = zoom < 1 ? Math.min(1 / zoom, 1.6) : 1;
   const { group, points, pulses, durationMs, reducedMotion, motionScale } = data;
   const path = roundedPath(points, data.compact ? 9 : 12);
   const mid = data.labelAt;
@@ -332,7 +332,7 @@ const WireEdge = memo(function WireEdge({ id, data }: EdgeProps<WireEdgeT>) {
           >
             {frozen ? <Lock className="size-3" aria-hidden="true" /> : null}
             {offending ? <TriangleAlert className="size-3" aria-hidden="true" /> : null}
-            {data.label}
+            {data.compact && data.label.length > 5 ? data.label.replace(/[a-z]+/g, "") || data.label.slice(0, 3) : data.label}
           </button>
           {data.hovered ? <WireCard data={data} /> : null}
         </div>

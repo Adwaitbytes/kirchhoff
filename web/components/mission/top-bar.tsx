@@ -64,12 +64,16 @@ export function StatusPill({ status }: { status: TokenStatusResponse }) {
       <span data-testid="status-pill" data-status={t.status} className={cn("inline-flex h-8 items-center gap-2 rounded-full border px-3 text-sm font-semibold transition-colors duration-300", s.border, s.soft, s.text)}>
         <Icon className="size-4" strokeWidth={2.25} aria-hidden="true" />
         <span className="tracking-[0.02em]">{t.status}</span>
-        <span className="opacity-60" aria-hidden="true">
-          ·
-        </span>
-        <span className="font-mono font-medium tnum">
-          Δ {formatAmount(delta, { decimals: t.decimals, maxFraction: 0, signed: true })} {t.symbol}
-        </span>
+        {hasEpoch(t) ? (
+          <>
+            <span className="opacity-60" aria-hidden="true">
+              ·
+            </span>
+            <span className="font-mono font-medium tnum">
+              Δ {formatAmount(delta, { decimals: t.decimals, maxFraction: 0, signed: true })} {t.symbol}
+            </span>
+          </>
+        ) : null}
       </span>
     </Verifiable>
   );
@@ -115,7 +119,7 @@ export function MissionTopBar({ token, status, stream }: { token: string; status
   const { sound, setSound } = usePrefs();
   const epochTx = status?.epoch?.reportTxs[0];
   return (
-    <header className="surface-glass sticky top-0 z-30 flex min-h-14 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-wire px-3 py-2 sm:px-4">
+    <header className="@container surface-glass sticky top-0 z-30 flex min-h-14 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-wire px-3 py-2 sm:px-4">
       <div className="flex items-center gap-2">
         <TokenSwitcher current={token} basePath="/app/tokens" />
         <TestnetBadge />
