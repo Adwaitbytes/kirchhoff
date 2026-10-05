@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { RefreshCw, SearchX } from "lucide-react";
 import type { ChainKey, TokenStatusResponse } from "@/lib/api/types";
 import { isApiError } from "@/lib/api/client";
@@ -13,7 +13,7 @@ import { Banner } from "@/components/kh/banner";
 import { EmptyState, Panel, PanelHeader } from "@/components/kh/panel";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Segmented } from "@/components/ui/tabs";
 import { MissionTopBar } from "@/components/mission/top-bar";
 import { CircuitMap } from "@/components/mission/circuit-map";
 import { ConservationMeter } from "@/components/mission/conservation-meter";
@@ -23,10 +23,22 @@ import { DeltaHistory, DeltaHistorySkeleton } from "@/components/mission/delta-h
 import { LedgerDrawer } from "@/components/mission/ledger-drawer";
 import { BreachEffects, BreachToast } from "@/components/mission/breach-effects";
 import { cn } from "@/lib/utils";
+import { hasEpoch, NO_EPOCH_BANNER } from "@/lib/status";
 import { ClientGate } from "@/components/kh/client-gate";
+import { SpecProposalAlert } from "@/components/kh/spec-proposal-alert";
 
 function StaleBanner({ status }: { status: TokenStatusResponse }) {
   const now = useNow();
+  const policy = status.onStale === "fail_closed" ? "fail closed" : "fail open";
+  if (!hasEpoch(status.token)) {
+    return (
+      <Banner tone="stale">
+        <span data-testid="no-epoch-banner">
+          {NO_EPOCH_BANNER} ({policy}).
+        </span>
+      </Banner>
+    );
+  }
   const age = now === 0 ? 0 : secondsBetween(status.token.updatedAt, now);
   return (
     <Banner tone="stale">
@@ -62,7 +74,8 @@ function StateBanners({ status, apiError, onRetry }: { status: TokenStatusRespon
           </Banner>
         ),
       )}
-      {status?.token.stale ? <StaleBanner status={status} /> : null}
+      {status && (status.token.stale || !hasEpoch(status.token)) ? <StaleBanner status={status} /> : null}
+      {status ? <SpecProposalAlert token={status.token.symbol} /> : null}
       {status && breached ? <BreachToast status={status} /> : null}
     </>
   );
@@ -100,7 +113,11 @@ function MissionControlLive({ token, variant }: { token: string; variant: "full"
   const stream = useTokenStream(token);
   const [drawer, setDrawer] = useState<ChainKey | null>(null);
   const [historyView, setHistoryView] = useState<"chart" | "table">("chart");
-  const openChain = useCallback((c: ChainKey) => setDrawer(c), []);
+  const opener = useRef<HTMLElement | null>(null);
+  const openChain = useCallback((c: ChainKey) => {
+    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setDrawer(c);
+  }, []);
   const data = status.data;
   const notFound = isApiError(status.error) && status.error.code === "NOT_FOUND";
   const stale = data?.token.stale ?? false;
@@ -171,7 +188,7 @@ function MissionControlLive({ token, variant }: { token: string; variant: "full"
             </div>
             <div className="grid min-h-0 grid-cols-1 gap-3 xl:col-span-2 xl:grid-cols-2">
               <Panel className={cn("min-h-[240px] overflow-hidden xl:min-h-0", stale && "is-stale")} aria-labelledby="ledger-title">
-                <PanelHeader id="ledger-title" title="Ledger" meta={data?.epoch ? `Epoch ${Number(data.epoch.epochId).toLocaleString("en-US")} pinned blocks` : undefined} />
+                <PanelHeader id="ledger-title" title="Ledger" meta={data?.epoch && hasEpoch(data.token) ? `Epoch ${Number(data.epoch.epochId).toLocaleString("en-US")} pinned blocks` : undefined} />
                 {data ? <LedgerTable status={data} onOpenChain={openChain} /> : <LedgerTableSkeleton />}
               </Panel>
               <Panel className={cn("min-h-[240px] overflow-hidden xl:min-h-0", stale && "is-stale")} aria-labelledby="history-title">
@@ -180,12 +197,15 @@ function MissionControlLive({ token, variant }: { token: string; variant: "full"
                   title="Δ over 24h"
                   meta="Red marks an incident"
                   actions={
-                    <Tabs value={historyView} onValueChange={(v) => setHistoryView(v === "table" ? "table" : "chart")}>
-                      <TabsList label="Δ history view">
-                        <TabsTrigger value="chart">Chart</TabsTrigger>
-                        <TabsTrigger value="table">Table</TabsTrigger>
-                      </TabsList>
-                    </Tabs>
+                    <Segmented
+                      label="Δ history view"
+                      value={historyView}
+                      onChange={setHistoryView}
+                      options={[
+                        { value: "chart", label: "Chart" },
+                        { value: "table", label: "Table" },
+                      ]}
+                    />
                   }
                 />
                 {epochs.data && data ? <DeltaHistory epochs={epochs.data.items} decimals={decimals} symbol={data.token.symbol} view={historyView} /> : <DeltaHistorySkeleton />}
@@ -202,7 +222,7 @@ function MissionControlLive({ token, variant }: { token: string; variant: "full"
           </div>
         )}
       </div>
-      {data ? <LedgerDrawer status={data} chain={drawer} onClose={() => setDrawer(null)} /> : null}
+      {data ? <LedgerDrawer status={data} chain={drawer} onClose={() => setDrawer(null)} returnFocusTo={opener.current} /> : null}
     </div>
   );
 }

@@ -1,8 +1,7 @@
 "use client";
 
-import "@xyflow/react/dist/base.css";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BaseEdge, EdgeLabelRenderer, Handle, Position, ReactFlow, useReactFlow, type Edge, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
+import { BaseEdge, EdgeLabelRenderer, Handle, Position, ReactFlow, useReactFlow, useStore, type Edge, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
 import { ArrowRight, Lock, Sigma, TriangleAlert } from "lucide-react";
 import type { ChainKey, LaneTransfer, TokenStatus, TokenStatusResponse } from "@/lib/api/types";
 import { CHAINS } from "@/lib/chains";
@@ -274,8 +273,14 @@ function PulseDot({ pulse, path, durationMs }: { pulse: Pulse; path: string; dur
   );
 }
 
+const zoomSelector = (s: { transform: [number, number, number] }) => s.transform[2];
+
 const WireEdge = memo(function WireEdge({ id, data }: EdgeProps<WireEdgeT>) {
+  // Chips and their hover cards keep their true size when the schematic is zoomed out to fit,
+  // so they stay legible and meet the 24px target size.
+  const zoom = useStore(zoomSelector);
   if (!data) return null;
+  const chipScale = zoom < 1 ? 1 / zoom : 1;
   const { group, points, pulses, durationMs, reducedMotion, motionScale } = data;
   const path = roundedPath(points, data.compact ? 9 : 12);
   const mid = data.labelAt;
@@ -308,7 +313,7 @@ const WireEdge = memo(function WireEdge({ id, data }: EdgeProps<WireEdgeT>) {
       <EdgeLabelRenderer>
         <div
           className="nodrag nopan pointer-events-auto absolute"
-          style={{ transform: `translate(-50%, -50%) translate(${mid.x}px, ${mid.y}px)`, zIndex: data.hovered ? 30 : 1 }}
+          style={{ transform: `translate(${mid.x}px, ${mid.y}px) scale(${chipScale}) translate(-50%, -50%)`, transformOrigin: "0 0", zIndex: data.hovered ? 30 : 1 }}
           onMouseEnter={() => data.onHover(group.id)}
           onMouseLeave={() => data.onHover(null)}
         >
@@ -321,7 +326,7 @@ const WireEdge = memo(function WireEdge({ id, data }: EdgeProps<WireEdgeT>) {
             aria-expanded={data.hovered}
             aria-label={`${data.label} wire between ${CHAINS[group.a].name} and ${CHAINS[group.b].name}. ${group.transfers.length} recent transfers.${frozen ? " Lanes frozen." : ""}${offending ? " Forged credit on this wire." : ""}`}
             className={cn(
-              "flex h-6 cursor-pointer items-center gap-1 rounded-md border bg-panel px-1.5 font-mono text-2xs font-medium shadow-panel transition-colors",
+              "flex h-7 min-w-7 cursor-pointer items-center justify-center gap-1 rounded-md border bg-panel px-2 font-mono text-2xs font-medium shadow-panel transition-colors",
               offending ? "border-broken text-broken" : frozen ? "border-quarantined/60 text-quarantined" : "border-wire text-muted hover:border-line-strong hover:text-fg",
             )}
           >

@@ -76,3 +76,14 @@ export const STATUS_STYLE: Readonly<Record<TokenStatus, StatusStyle>> = {
 export function isBreached(s: TokenStatus): boolean {
   return s === "BROKEN" || s === "QUARANTINED";
 }
+
+/**
+ * A token with no epoch yet: the API reports epochId "0" and updatedAt at the Unix epoch.
+ * Never render an age from that sentinel.
+ */
+export function hasEpoch(t: { epochId: string; updatedAt: string }): boolean {
+  const at = Date.parse(t.updatedAt);
+  return t.epochId !== "0" && Number.isFinite(at) && at > 0;
+}
+
+export const NO_EPOCH_BANNER = "No epoch recorded yet. Verdicts follow the token's stale policy";

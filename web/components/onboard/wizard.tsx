@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, Sparkles } from "lucide-react";
-import type { Address, SpecDraftEvent } from "@/lib/api/types";
+import type { Address, ScoutProposal, SpecDraftEvent } from "@/lib/api/types";
 import { useApi } from "@/lib/api/provider";
 import { DATA_SOURCE, isApiError } from "@/lib/api/client";
 import { fxAddress } from "@/lib/api/fixtures/ids";
@@ -16,7 +16,9 @@ import { Stepper } from "@/components/onboard/stepper";
 import { StepDescribe, describeErrors } from "@/components/onboard/step-describe";
 import { StepDiscover } from "@/components/onboard/step-discover";
 import { SpecReview } from "@/components/onboard/spec-review";
-import { StepBacktest } from "@/components/onboard/step-backtest";
+import { AutoBacktestSummary, StepBacktest } from "@/components/onboard/step-backtest";
+import { ScoutPanel } from "@/components/onboard/step-scout";
+import { computeLines, formatLineList, missingLines } from "@/components/onboard/provenance";
 import { StepPropose } from "@/components/onboard/step-propose";
 import { StepTimelock } from "@/components/onboard/step-timelock";
 
@@ -118,7 +120,23 @@ export function OnboardWizard() {
   }, [api, input]);
 
   const backtest = useMutation({ mutationFn: (y: string) => api.backtestSpec({ yaml: y }) });
-  const specHash = backtest.data?.specHash ?? null;
+  const runBacktest = backtest.mutate;
+  // A backtest result only counts for the exact YAML it replayed.
+  const current = backtest.variables === yaml;
+  const result = current ? backtest.data : undefined;
+  const resultError = current && backtest.error ? errorMessage(backtest.error, "Backtest failed.") : null;
+  const resultPending = current && backtest.isPending;
+  const specHash = result?.specHash ?? null;
+
+  const red = useMemo(() => (discovery.draft ? missingLines(computeLines(yaml, discovery.draft.lines)) : []), [yaml, discovery.draft]);
+
+  // The backtest runs on its own once the draft validates: every line has evidence.
+  useEffect(() => {
+    if (!discovery.draft || red.length > 0 || yaml.trim().length === 0) return;
+    if (backtest.variables === yaml) return;
+    const t = window.setTimeout(() => runBacktest(yaml), 600);
+    return () => window.clearTimeout(t);
+  }, [yaml, red.length, discovery.draft, backtest.variables, runBacktest]);
   const proposal = useQuery({
     queryKey: ["spec-proposal", specHash],
     queryFn: ({ signal }) => api.getSpecProposal(specHash as NonNullable<typeof specHash>, signal),
@@ -128,14 +146,18 @@ export function OnboardWizard() {
 
   const onYamlChange = (v: string) => {
     setYaml(v);
-    if (reached > 2) {
-      setReached(2);
-      backtest.reset();
-    }
+    if (reached > 2) setReached(2);
+  };
+
+  /** Scout patches enter the draft as issuer-authored lines, under a comment naming the finding. */
+  const addScoutPatch = (p: ScoutProposal) => {
+    if (!p.specPatch) return;
+    const block = [`# Topology Scout: ${p.kind.replace(/_/g, " ")} on ${p.chainName} (${p.address})`, ...p.specPatch.split(/\r?\n/)].join("\n");
+    onYamlChange(`${yaml.replace(/\s+$/, "")}\n${block}\n`);
   };
 
   const approve = () => {
-    backtest.mutate(yaml);
+    if (!current || backtest.isError) runBacktest(yaml);
     go(3);
   };
 
@@ -143,7 +165,14 @@ export function OnboardWizard() {
     const e = describeErrors(input);
     return e.description === null && e.address === null;
   })();
-  const backtestOk = backtest.data ? backtest.data.ok && backtest.data.breaches.length === 0 : false;
+  const backtestOk = result ? result.ok && result.breaches.length === 0 : false;
+  const approveBlock = resultPending
+    ? "Backtest still replaying history."
+    : resultError
+      ? `Backtest failed: ${resultError}`
+      : result && !backtestOk
+        ? `Backtest found ${result.breaches.length} BROKEN on real history. Fix the spec first.`
+        : null;
   const proposed = proposal.data ? proposal.data.state !== "draft" : false;
 
   const next: { label: string; enabled: boolean; action: () => void } | null = (() => {
@@ -211,13 +240,22 @@ export function OnboardWizard() {
                 {step === 1 ? <StepDiscover state={discovery} onStart={startDiscovery} onStop={() => abortRef.current?.abort()} /> : null}
                 {step === 2 ? (
                   discovery.draft ? (
-                    <SpecReview draft={discovery.draft} yaml={yaml} onYamlChange={onYamlChange} validation={discovery.validation} onApprove={approve} />
+                    <SpecReview draft={discovery.draft} yaml={yaml} onYamlChange={onYamlChange} validation={discovery.validation} onApprove={approve} approveBlock={approveBlock}>
+                      <AutoBacktestSummary
+                        result={result}
+                        pending={resultPending}
+                        error={resultError}
+                        waitingOn={red.length > 0 ? `Waiting on evidence: ${formatLineList(red)}` : null}
+                        onOpen={() => go(3)}
+                      />
+                      <ScoutPanel token={token ?? "kETH"} onAddPatch={addScoutPatch} />
+                    </SpecReview>
                   ) : (
                     <p className="text-sm text-muted">No draft yet. Run the Copilot first.</p>
                   )
                 ) : null}
                 {step === 3 ? (
-                  <StepBacktest result={backtest.data} pending={backtest.isPending} error={backtest.error ? errorMessage(backtest.error, "Backtest failed.") : null} onRun={() => backtest.mutate(yaml)} />
+                  <StepBacktest result={result} pending={resultPending} error={resultError} onRun={() => runBacktest(yaml)} />
                 ) : null}
                 {step === 4 && specHash ? (
                   <StepPropose

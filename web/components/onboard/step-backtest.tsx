@@ -1,6 +1,6 @@
 "use client";
 
-import { CircleCheck, OctagonX, RotateCcw, TriangleAlert } from "lucide-react";
+import { ArrowRight, CircleCheck, Loader, OctagonX, RotateCcw, TriangleAlert } from "lucide-react";
 import type { BacktestResponse } from "@/lib/api/types";
 import { CHAINS } from "@/lib/chains";
 import { blockUrl, shortHash } from "@/lib/explorer";
@@ -55,6 +55,11 @@ export function StepBacktest({ result, pending, error, onRun }: { result: Backte
   const blocked = !result.ok || result.breaches.length > 0;
   return (
     <div className="space-y-5">
+      <div className="flex justify-end">
+        <Button size="sm" variant="ghost" onClick={onRun}>
+          <RotateCcw aria-hidden="true" /> Replay again
+        </Button>
+      </div>
       {blocked ? (
         <Banner tone="breach">
           <span className="font-medium">Activation blocked.</span> {result.breaches.length} BROKEN on real history. Fix the spec or the bridge before proposing.
@@ -146,5 +151,60 @@ export function StepBacktest({ result, pending, error, onRun }: { result: Backte
       ) : null}
       <p className="font-mono text-xs text-subtle">spec {shortHash(result.specHash, 10, 8)}</p>
     </div>
+  );
+}
+
+/** Inline result of the automatic backtest, shown in the review step. */
+export function AutoBacktestSummary({
+  result,
+  pending,
+  error,
+  waitingOn,
+  onOpen,
+}: {
+  result: BacktestResponse | undefined;
+  pending: boolean;
+  error: string | null;
+  /** Why the backtest has not run yet, e.g. red lines still present. */
+  waitingOn: string | null;
+  onOpen: () => void;
+}) {
+  const blocked = result ? !result.ok || result.breaches.length > 0 : false;
+  const tone = error || blocked ? "border-broken/45 bg-broken/5" : result ? "border-conserved/40 bg-conserved/5" : "border-wire bg-panel";
+  return (
+    <section data-testid="auto-backtest" aria-live="polite" aria-labelledby="auto-backtest-title" className={cn("flex flex-col gap-3 rounded-xl border p-4 shadow-panel sm:flex-row sm:items-center", tone)}>
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-wire bg-inset" aria-hidden="true">
+        {pending ? (
+          <Loader className="size-4 text-muted motion-safe:animate-spin" />
+        ) : error || blocked ? (
+          <OctagonX className="size-4 text-broken" />
+        ) : result ? (
+          <CircleCheck className="size-4 text-conserved" />
+        ) : (
+          <RotateCcw className="size-4 text-subtle" />
+        )}
+      </span>
+      <div className="min-w-0 flex-1">
+        <h3 id="auto-backtest-title" className="text-sm font-medium text-fg">
+          Automatic backtest
+        </h3>
+        <p className={cn("text-sm", error || blocked ? "text-broken" : "text-muted")}>
+          {pending
+            ? "Replaying real history through the engine"
+            : error
+              ? `Backtest failed: ${error}`
+              : result
+                ? blocked
+                  ? `Blocked: ${result.breaches.length} BROKEN on real history`
+                  : `History conserves: ${result.eventsReplayed.toLocaleString("en-US")} events, zero breaches`
+                : (waitingOn ?? "Runs as soon as every line carries evidence")}
+        </p>
+      </div>
+      {result || error ? (
+        <Button size="sm" variant="outline" onClick={onOpen}>
+          Full backtest <ArrowRight aria-hidden="true" />
+        </Button>
+      ) : null}
+    </section>
   );
 }

@@ -88,6 +88,7 @@ export function DeltaHistory({ epochs, decimals, symbol, view }: { epochs: Epoch
       <div className="min-h-0 flex-1 px-2 pt-2" aria-hidden="true">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart
+            accessibilityLayer={false}
             data={data}
             margin={{ top: 8, right: 16, bottom: 0, left: 4 }}
             onMouseMove={(s) => {

@@ -1,6 +1,8 @@
 "use client";
 
-import { ArrowUpRight, Check, CircleDashed, Lock, RotateCcw, Sparkles } from "lucide-react";
+import { ReplayAfterRecovery } from "@/components/incident/replay-plan";
+import { scrubZeros } from "@/components/incident/loop";
+import { ArrowUpRight, Check, CircleDashed, Lock, Sparkles } from "lucide-react";
 import type { EvidenceItem, IncidentResponse, NarrativeSentence } from "@/lib/api/types";
 import { PLAYBOOK_LABEL } from "@/lib/api/types";
 import { CHAINS } from "@/lib/chains";
@@ -8,7 +10,6 @@ import { ccipMessageUrl, shortHash, txRefUrl } from "@/lib/explorer";
 import { formatAmount, formatDateTime, formatTime, parseWei } from "@/lib/format";
 import { AddressLink, TxLink, Verifiable } from "@/components/kh/links";
 import { Panel, PanelHeader } from "@/components/kh/panel";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -18,13 +19,13 @@ import { CONTAINMENT_LABEL } from "@/components/incident/postmortem";
 
 function CitationChip({ id, evidence, onCite }: { id: string; evidence: EvidenceItem | undefined; onCite: (id: string) => void }) {
   return (
-    <span className="mx-0.5 inline-flex h-5 items-stretch overflow-hidden rounded border border-wire bg-inset align-[2px] font-mono text-2xs leading-none text-muted">
-      <Tooltip content={evidence ? evidence.label : `Evidence ${id}`}>
+    <span className="mx-1 inline-flex h-6 items-stretch overflow-hidden rounded border border-wire bg-inset align-[1px] font-mono text-2xs leading-none text-muted">
+      <Tooltip content={evidence ? scrubZeros(evidence.label) : `Evidence ${id}`}>
         <button
           type="button"
           onClick={() => onCite(id)}
-          className="flex cursor-pointer items-center px-1.5 transition-colors hover:bg-raised hover:text-fg"
-          aria-label={`Show evidence ${id}${evidence ? `: ${evidence.label}` : ""}`}
+          className="flex min-w-6 cursor-pointer items-center justify-center px-1.5 transition-colors hover:bg-raised hover:text-fg"
+          aria-label={`Show evidence ${id}${evidence ? `: ${scrubZeros(evidence.label)}` : ""}`}
         >
           {id.replace(/^ev-/, "")}
         </button>
@@ -34,7 +35,7 @@ function CitationChip({ id, evidence, onCite }: { id: string; evidence: Evidence
           href={txRefUrl(evidence.tx)}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center border-l border-wire px-1 transition-colors hover:bg-raised hover:text-fg"
+          className="flex min-w-6 items-center justify-center border-l border-wire px-1 transition-colors hover:bg-raised hover:text-fg"
           aria-label={`Open transaction for evidence ${id}`}
         >
           <ArrowUpRight className="size-3" aria-hidden="true" />
@@ -47,7 +48,7 @@ function CitationChip({ id, evidence, onCite }: { id: string; evidence: Evidence
 function Sentence({ s, byId, onCite }: { s: NarrativeSentence; byId: Map<string, EvidenceItem>; onCite: (id: string) => void }) {
   return (
     <>
-      {s.text}
+      {scrubZeros(s.text)}
       {s.citations.map((c) => (
         <CitationChip key={c} id={c} evidence={byId.get(c)} onCite={onCite} />
       ))}{" "}
@@ -207,10 +208,7 @@ export function HeldMessagesCard({ r, decimals }: { r: IncidentResponse; decimal
         title="Held at the junction"
         meta={`${r.heldMessages.length} message${r.heldMessages.length === 1 ? "" : "s"}`}
         actions={
-          <Button size="sm" variant="outline" disabled={!canReplay} aria-describedby="replay-reason" data-testid="replay-after-recovery">
-            <RotateCcw aria-hidden="true" />
-            Replay after recovery
-          </Button>
+          <ReplayAfterRecovery r={r} decimals={decimals} />
         }
       />
       <p id="replay-reason" className="px-4 pt-2.5 text-xs text-muted sm:px-5">

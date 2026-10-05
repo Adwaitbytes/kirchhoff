@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { BeforeMount, OnMount } from "@monaco-editor/react";
 import { ArrowUpRight, CircleAlert, FileCheck2, PenLine, ShieldCheck } from "lucide-react";
 import type { LineProvenance } from "@/lib/api/types";
@@ -118,7 +118,7 @@ function LineEvidence({ l }: { l: LineState | undefined }) {
         <span className="font-mono text-xs text-subtle tnum">L{l.line}</span>
         <ProvenanceChip l={l} interactive />
       </div>
-      <pre className="overflow-x-auto rounded-md bg-inset px-2.5 py-1.5 font-mono text-xs text-fg">{l.text.trim()}</pre>
+      <pre tabIndex={0} className="overflow-x-auto rounded-md bg-inset px-2.5 py-1.5 font-mono text-xs text-fg">{l.text.trim()}</pre>
       <p className="text-sm text-muted">
         {l.status === "missing"
           ? "No tool result backs this line. It cannot be approved as is. Edit it or remove it."
@@ -139,12 +139,18 @@ export function SpecReview({
   onYamlChange,
   validation,
   onApprove,
+  approveBlock = null,
+  children,
 }: {
   draft: Draft;
   yaml: string;
   onYamlChange: (v: string) => void;
   validation: Validation | null;
   onApprove: () => void;
+  /** Extra reason approval is blocked (a failing or pending backtest). */
+  approveBlock?: string | null;
+  /** Rendered between the editor and the approve bar (auto backtest, Scout). */
+  children?: ReactNode;
 }) {
   const { theme } = usePrefs();
   const lines = useMemo(() => computeLines(yaml, draft.lines), [yaml, draft.lines]);
@@ -197,7 +203,14 @@ export function SpecReview({
   };
 
   const height = `clamp(320px, ${lines.length * LINE_H + 12}px, min(680px, 72vh))`;
-  const reason = missing.length > 0 ? `${formatLineList(missing)} ${missing.length === 1 ? "has" : "have"} no evidence. Edit or remove ${missing.length === 1 ? "it" : "them"} to approve.` : null;
+  const reason =
+    missing.length > 0 ? `${formatLineList(missing)} ${missing.length === 1 ? "has" : "have"} no evidence. Edit or remove ${missing.length === 1 ? "it" : "them"} to approve.` : approveBlock;
+
+  const removeLine = (n: number) => {
+    const all = yaml.split(/\r?\n/);
+    all.splice(n - 1, 1);
+    onYamlChange(all.join("\n"));
+  };
 
   return (
     <div className="space-y-5">
@@ -289,7 +302,7 @@ export function SpecReview({
               </h3>
               <ul className="mt-2 space-y-1.5">
                 {missing.map((n) => (
-                  <li key={n}>
+                  <li key={n} className="flex items-center gap-1">
                     <button
                       type="button"
                       onClick={() => {
@@ -301,6 +314,15 @@ export function SpecReview({
                     >
                       <span className="font-mono text-xs text-broken tnum">L{n}</span>
                       <span className="min-w-0 truncate font-mono text-xs text-fg">{lines[n - 1]?.text.trim()}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeLine(n)}
+                      data-testid="remove-line"
+                      aria-label={`Remove line ${n}`}
+                      className="shrink-0 cursor-pointer rounded-md px-2 py-1 text-xs text-broken hover:bg-broken/10"
+                    >
+                      Remove
                     </button>
                   </li>
                 ))}
@@ -340,11 +362,13 @@ export function SpecReview({
         </aside>
       </div>
 
+      {children}
+
       <div className="flex flex-col gap-3 rounded-xl border border-wire bg-panel p-4 shadow-panel sm:flex-row sm:items-center">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-fg">{reason ? "Approval blocked" : "Every line carries evidence"}</p>
           <p id="approve-reason" className={cn("text-sm", reason ? "text-broken" : "text-muted")}>
-            {reason ?? "Approve to replay this spec against real history. Nothing goes onchain yet."}
+            {reason ?? "History conserves. Approve to prepare the Safe proposal. Nothing goes onchain yet."}
           </p>
         </div>
         <Button variant="primary" size="lg" onClick={onApprove} disabled={reason !== null || yaml.trim().length === 0} aria-describedby="approve-reason" data-testid="approve-spec">

@@ -15,6 +15,11 @@ import type {
   LabRunResponse,
   LabStatusResponse,
   OpsResponse,
+  ReplayPlanResponse,
+  ScoutProposalsResponse,
+  ScoutRequest,
+  ScoutResponse,
+  SpecProposalsResponse,
   SpecDraftEvent,
   SpecDraftRequest,
   SpecProposalResponse,
@@ -80,6 +85,10 @@ export interface KirchhoffApi {
   runKelpReplay(signal?: AbortSignal): Promise<LabRunResponse>;
   getLabRun(id: string, signal?: AbortSignal): Promise<LabRunResponse>;
   getOps(signal?: AbortSignal): Promise<OpsResponse>;
+  getSpecProposals(token: string, signal?: AbortSignal): Promise<SpecProposalsResponse>;
+  scout(body: ScoutRequest, signal?: AbortSignal): Promise<ScoutResponse>;
+  listScoutProposals(token: string, signal?: AbortSignal): Promise<ScoutProposalsResponse>;
+  getReplayPlan(incidentId: Bytes32, signal?: AbortSignal): Promise<ReplayPlanResponse>;
   listApiKeys(issuerKey: string, signal?: AbortSignal): Promise<ApiKeysResponse>;
   /** Opens the WS stream for one token with automatic reconnect. Returns a disposer. */
   subscribe(token: string, handlers: StreamHandlers): () => void;
@@ -229,6 +238,10 @@ export function createHttpClient({ baseUrl, issuerKey }: HttpClientOptions): Kir
     runKelpReplay: (signal) => request("/lab/kelp-replay", { method: "POST", body: "{}", signal }),
     getLabRun: (id, signal) => request(`/lab/runs/${enc(id)}`, { signal }),
     getOps: (signal) => request("/ops", { signal }),
+    getSpecProposals: (token, signal) => request(`/tokens/${enc(token)}/spec-proposals`, { signal }),
+    scout: (body, signal) => request("/specs/scout", { method: "POST", body: JSON.stringify(body), signal, auth: issuerKey ?? getIssuerKey() }),
+    listScoutProposals: (token, signal) => request(`/specs/proposals${qs({ token })}`, { signal, auth: issuerKey ?? getIssuerKey() }),
+    getReplayPlan: (id, signal) => request(`/incidents/${enc(id)}/replay-plan`, { method: "POST", body: "{}", signal }),
     listApiKeys: (key, signal) => request("/keys", { signal, auth: key }),
     subscribe: (token, handlers) => connectLive(`${root.replace(/^http/, "ws")}/stream?token=${enc(token)}`, `${root}/stream/sse?token=${enc(token)}`, handlers),
   };
@@ -328,6 +341,9 @@ export function connectStream(url: string, { onMessage, onState }: StreamHandler
  * API's SSE stream, which carries the same frames and resumes with Last-Event-ID.
  */
 export function connectLive(wsUrl: string, sseUrl: string, handlers: StreamHandlers): () => void {
+  // Serverless hosts (Vercel) cannot upgrade to WebSocket: go straight to SSE instead of logging failed handshakes.
+  const transport = process.env.NEXT_PUBLIC_STREAM_TRANSPORT ?? "auto";
+  const sseOnly = transport === "sse" || (transport === "auto" && /\.vercel\.app$/.test(new URL(sseUrl).hostname));
   let opened = false;
   let failures = 0;
   let disposeWs: (() => void) | null = null;
@@ -351,6 +367,11 @@ export function connectLive(wsUrl: string, sseUrl: string, handlers: StreamHandl
       if (isStreamMessage(parsed) && parsed.channel !== "ping") handlers.onMessage(parsed);
     };
   };
+
+  if (sseOnly && typeof EventSource !== "undefined") {
+    startSse();
+    return () => source?.close();
+  }
 
   disposeWs = connectStream(wsUrl, {
     onMessage: handlers.onMessage,

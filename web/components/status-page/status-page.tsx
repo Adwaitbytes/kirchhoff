@@ -9,7 +9,8 @@ import { useNow, useTokenStatus, useTokenStream } from "@/lib/api/hooks";
 import { CHAINS } from "@/lib/chains";
 import { blockUrl, readContractUrl, tokenUrl, txRefUrl } from "@/lib/explorer";
 import { formatAge, formatAgeWords, formatAmount, parseWei, secondsBetween } from "@/lib/format";
-import { STATUS_STYLE, isBreached } from "@/lib/status";
+import { STATUS_STYLE, isBreached, hasEpoch, NO_EPOCH_BANNER } from "@/lib/status";
+import { SpecProposalAlert } from "@/components/kh/spec-proposal-alert";
 import { Banner } from "@/components/kh/banner";
 import { EmptyState } from "@/components/kh/panel";
 import { StatusWord } from "@/components/kh/status";
@@ -27,6 +28,7 @@ import { cn } from "@/lib/utils";
 export function heroCopy(status: TokenStatusResponse, ageSeconds: number): string {
   const t = status.token;
   const n = status.chains.length;
+  if (!hasEpoch(t)) return `${t.symbol} has no epoch recorded yet. Verdicts ${status.onStale === "fail_closed" ? "fail closed" : "fail open"} until the first one lands.`;
   const checked = `Last checked ${formatAgeWords(ageSeconds)} ago.`;
   if (t.stale) return `${t.symbol} has no fresh reading. ${checked}`;
   switch (t.status) {
@@ -246,7 +248,7 @@ function EmbedBadge({ token }: { token: string }) {
               <span className="text-xs text-muted">{label}</span>
               <CopyButton value={code} label={`${label} badge snippet`} />
             </div>
-            <pre className="overflow-x-auto px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-muted">
+            <pre tabIndex={0} className="overflow-x-auto px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-muted">
               <code>{origin ? code : "Loading snippet"}</code>
             </pre>
           </div>
@@ -270,13 +272,19 @@ function Hero({ status }: { status: TokenStatusResponse }) {
         {heroCopy(status, age)}
       </h1>
       <div className="flex max-w-full justify-center overflow-hidden">
-        <DeltaReadout delta={parseWei(t.delta)} decimals={t.decimals} symbol={t.symbol} href={readContractUrl(status.ledger.chain, status.ledger.address)} size="large" />
+        {hasEpoch(t) ? (
+          <DeltaReadout delta={parseWei(t.delta)} decimals={t.decimals} symbol={t.symbol} href={readContractUrl(status.ledger.chain, status.ledger.address)} size="large" />
+        ) : (
+          <p className="font-mono text-lg text-unknown-text">Δ awaits the first epoch</p>
+        )}
       </div>
       <dl className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted">
         <div className="flex items-center gap-1.5">
           <dt>Last epoch</dt>
           <dd className="font-mono text-fg tnum">
-            {epochTx ? (
+            {!hasEpoch(t) ? (
+              <span className="font-sans text-unknown-text">No epoch yet</span>
+            ) : epochTx ? (
               <Verifiable href={txRefUrl(epochTx)} label="Latest epoch report transaction">
                 {formatAge(age)} ago
               </Verifiable>
@@ -287,7 +295,7 @@ function Hero({ status }: { status: TokenStatusResponse }) {
         </div>
         <div className="flex items-center gap-1.5">
           <dt>Epoch</dt>
-          <dd className="font-mono text-fg tnum">{status.epoch ? Number(status.epoch.epochId).toLocaleString("en-US") : "none"}</dd>
+          <dd className="font-mono text-fg tnum">{status.epoch && hasEpoch(t) ? Number(status.epoch.epochId).toLocaleString("en-US") : "none"}</dd>
         </div>
         <div className="flex items-center gap-1.5">
           <dt>Stale policy</dt>
@@ -363,11 +371,18 @@ export function StatusPage({ token }: { token: string }) {
                   </Banner>
                 ),
               )}
-              {data?.token.stale ? (
+              {data && !hasEpoch(data.token) ? (
+                <Banner tone="stale">
+                  <span data-testid="no-epoch-banner">
+                    {NO_EPOCH_BANNER} ({data.onStale === "fail_closed" ? "fail closed" : "fail open"}).
+                  </span>
+                </Banner>
+              ) : data?.token.stale ? (
                 <Banner tone="stale">
                   Last epoch {formatAge(now === 0 ? 0 : secondsBetween(data.token.updatedAt, now))} ago. Verdicts follow the token&apos;s stale policy.
                 </Banner>
               ) : null}
+              {data ? <SpecProposalAlert token={data.token.symbol} /> : null}
             </div>
             {data ? <Hero status={data} /> : <HeroSkeleton />}
             <div className="mt-10 space-y-5">

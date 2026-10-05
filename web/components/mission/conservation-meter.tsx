@@ -8,6 +8,7 @@ import { escrowBalanceUrl, readContractUrl } from "@/lib/explorer";
 import { useDuration } from "@/lib/prefs";
 import { Verifiable } from "@/components/kh/links";
 import { cn } from "@/lib/utils";
+import { hasEpoch } from "@/lib/status";
 
 const COUNT_MS = 800;
 
@@ -121,7 +122,13 @@ export function ConservationMeter({ status }: { status: TokenStatusResponse }) {
         <Bar label="Claims" value={claims} scale={scale} backing={backing} kind="claims" decimals={token.decimals} symbol={token.symbol} href={ledgerHref} />
         <div aria-hidden="true" className="pointer-events-none absolute bottom-0 top-5 w-px bg-fg/50 transition-[left] duration-700" style={{ left: `${markerPct}%` }} />
       </div>
-      <DeltaReadout delta={delta} decimals={token.decimals} symbol={token.symbol} href={ledgerHref} />
+      {hasEpoch(token) ? (
+        <DeltaReadout delta={delta} decimals={token.decimals} symbol={token.symbol} href={ledgerHref} />
+      ) : (
+        <p className="flex h-[72px] items-center font-mono text-xl text-unknown-text" data-testid="delta-pending">
+          Δ awaits the first epoch
+        </p>
+      )}
       <p className="text-xs text-muted">
         {delta < 0n && claims <= backing
           ? "Δ is the last value recorded onchain. Live backing covers claims again; transfers resume after the timelock and a clean epoch."

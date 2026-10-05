@@ -291,7 +291,9 @@ export function createFixtureClient(world: FixtureWorld): KirchhoffApi {
           ...world.meta(),
           windowSeconds: 3600,
           enforcement: "ccv_cell",
+          sources: { verdicts: "fixtures://local/v1/tokens/kETH/verdicts", metrics: ["fixtures://local/cell-1/metrics"] },
           cells: ["sgp-1", "fra-1", "iad-1", "nrt-1"].map((name, i) => ({
+            metricsUrl: `fixtures://local/cell-${i + 1}/metrics`,
             id: `cell-${i + 1}`,
             name: `cell-${i + 1}`,
             region: name,
@@ -321,6 +323,24 @@ export function createFixtureClient(world: FixtureWorld): KirchhoffApi {
             reportTxs: w === "w4-topology" ? [] : [clock.tx("ethereum-testnet-sepolia", `cre:${i}`, now - i * 30_000)],
           })),
         };
+      }, signal),
+
+    getSpecProposals: (token, signal) =>
+      call(`GET /tokens/${token}/spec-proposals`, () => ({ ...world.meta(), token, items: world.specProposals(token) }), signal),
+
+    scout: (body, signal) =>
+      call("POST /specs/scout", () => {
+        const now = new Date().toISOString();
+        return { ...world.meta(), runId: `scout_${fxHash(`scout:${body.token}`).slice(2, 10)}`, startedAt: now, finishedAt: now, proposals: world.scoutProposals(body.token) };
+      }, signal),
+
+    listScoutProposals: (token, signal) => call(`GET /specs/proposals`, () => ({ ...world.meta(), items: world.scoutProposals(token) }), signal),
+
+    getReplayPlan: (id, signal) =>
+      call(`POST /incidents/${id}/replay-plan`, () => {
+        const plan = world.replayPlan(id);
+        if (!plan) throw notFound(`Incident ${id}`, `POST /incidents/${id}/replay-plan`);
+        return plan;
       }, signal),
 
     listApiKeys: (key, signal) =>

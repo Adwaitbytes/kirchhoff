@@ -19,7 +19,7 @@ function resolveBlockedReason(r: IncidentResponse): string {
   return `Resolve needs QUARANTINED. Now ${r.tokenStatus}`;
 }
 
-function CopyButton({ value, label }: { value: string; label: string }) {
+export function CopyButton({ value, label }: { value: string; label: string }) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
   return (
     <Button
@@ -97,7 +97,7 @@ export function ResolveIncident({ r }: { r: IncidentResponse }) {
               <span className="text-xs font-medium text-muted">Calldata</span>
               <CopyButton value={calldata} label="Copy calldata" />
             </div>
-            <pre data-testid="resolve-calldata" className="max-h-40 overflow-auto whitespace-pre-wrap break-all px-3 py-2.5 font-mono text-xs leading-relaxed text-fg">
+            <pre tabIndex={0} data-testid="resolve-calldata" className="max-h-40 overflow-auto whitespace-pre-wrap break-all px-3 py-2.5 font-mono text-xs leading-relaxed text-fg">
               {calldata}
             </pre>
           </div>

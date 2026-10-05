@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ArrowRight, ArrowUpRight, Cpu, FlaskConical, Lock, OctagonX, Radio, ScanSearch, ShieldCheck, Sigma, X, Zap } from "lucide-react";
 import { useNow, useTokens } from "@/lib/api/hooks";
 import { formatAge, formatAmount, parseWei, secondsBetween } from "@/lib/format";
-import { STATUS_STYLE } from "@/lib/status";
+import { STATUS_STYLE, hasEpoch } from "@/lib/status";
 import { Enter, Reveal } from "@/components/landing/reveal";
 import { CurrentField } from "@/components/landing/current-field";
 import { LandingNav } from "@/components/landing/landing-nav";
@@ -36,7 +36,7 @@ function LiveStatus() {
   }
   const s = STATUS_STYLE[t.status];
   const Icon = s.icon;
-  const age = now === 0 ? null : secondsBetween(t.updatedAt, now);
+  const age = now === 0 || !hasEpoch(t) ? null : secondsBetween(t.updatedAt, now);
   return (
     <Link
       href={`/t/${t.symbol}`}
@@ -51,9 +51,9 @@ function LiveStatus() {
         {t.status}
       </span>
       <span className="truncate font-mono text-fg tnum">
-        {t.symbol} Δ {formatAmount(parseWei(t.delta), { decimals: t.decimals, maxFraction: 0, signed: true })}
+        {hasEpoch(t) ? `${t.symbol} Δ ${formatAmount(parseWei(t.delta), { decimals: t.decimals, maxFraction: 0, signed: true })}` : t.symbol}
       </span>
-      <span className="hidden truncate text-muted sm:inline">{age === null ? "" : `checked ${formatAge(age)} ago`}</span>
+      <span className="hidden truncate text-muted sm:inline">{!hasEpoch(t) ? "no epoch yet" : age === null ? "" : `checked ${formatAge(age)} ago`}</span>
       <ArrowUpRight className="size-4 shrink-0 text-subtle transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" aria-hidden="true" />
     </Link>
   );
@@ -339,7 +339,7 @@ function Chainlink() {
                 <span className="font-mono">KirchhoffProtected.sol</span>
                 <span>One line in your lending market</span>
               </figcaption>
-              <pre className="overflow-x-auto p-5 font-mono text-[12.5px] leading-[1.75] text-muted">
+              <pre tabIndex={0} className="overflow-x-auto p-5 font-mono text-[12.5px] leading-[1.75] text-muted">
                 <code>
                   {SNIPPET.split("\n").map((l, i) => (
                     <span key={i} className={cn("block", /revert|_requireConserved/.test(l) && "text-fg", /\/\//.test(l) && "text-conserved")}>

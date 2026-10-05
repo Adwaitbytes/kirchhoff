@@ -7,7 +7,7 @@ import { useNow, useTokenStatus } from "@/lib/api/hooks";
 import { CHAINS } from "@/lib/chains";
 import { blockUrl, escrowBalanceUrl, readContractUrl, tokenUrl } from "@/lib/explorer";
 import { formatAge, formatAmount, parseWei, secondsBetween } from "@/lib/format";
-import { STATUS_STYLE } from "@/lib/status";
+import { STATUS_STYLE, hasEpoch } from "@/lib/status";
 import { StatusWord } from "@/components/kh/status";
 import { Verifiable } from "@/components/kh/links";
 import { SimulationLabel } from "@/components/kh/simulation";
@@ -29,10 +29,10 @@ export function JunctionVisual() {
           <span className="absolute inset-0 rounded-full bg-[repeating-linear-gradient(90deg,var(--status-conserved)_0_6px,transparent_6px_18px)] opacity-60 motion-safe:animate-[dash-flow_1.2s_linear_infinite]" />
           <span className="absolute -top-[4px] size-2.5 rounded-full bg-conserved shadow-[0_0_12px_var(--status-conserved)] motion-safe:animate-[travel_2.4s_cubic-bezier(0.45,0,0.55,1)_infinite]" />
         </span>
-        <span className="flex items-center justify-center gap-1 truncate rounded-md border border-conserved/50 bg-conserved/10 px-2 py-1.5 font-mono text-2xs text-conserved motion-safe:animate-[ok-glow_2.4s_ease-in-out_infinite]">
+        <span className="flex items-center justify-center gap-1 truncate rounded-md border border-conserved/50 bg-panel px-2 py-1.5 font-mono text-2xs text-conserved motion-safe:animate-[ok-glow_2.4s_ease-in-out_infinite]">
           <Check className="size-3 shrink-0" strokeWidth={3} />
           <span className="truncate">
-            Mint<span className="block opacity-70 sm:ml-1 sm:inline">Base</span>
+            Mint<span className="block sm:ml-1 sm:inline">Base</span>
           </span>
         </span>
       </div>
@@ -46,8 +46,8 @@ export function JunctionVisual() {
             <X className="size-3.5" strokeWidth={3} />
           </span>
         </span>
-        <span className="truncate rounded-md border border-broken/60 bg-broken/10 px-2 py-1.5 text-center font-mono text-2xs text-broken">
-          Release<span className="block opacity-70 sm:ml-1 sm:inline">Sepolia</span>
+        <span className="truncate rounded-md border border-broken/60 bg-panel px-2 py-1.5 text-center font-mono text-2xs text-broken">
+          Release<span className="block sm:ml-1 sm:inline">Sepolia</span>
         </span>
       </div>
       <p className="pt-1 font-mono text-2xs text-broken">DEBIT_NOT_FOUND · BROKEN on every ledger, same run</p>
@@ -308,7 +308,9 @@ export function LiveCircuit({ token = "kETH" }: { token?: string }) {
     <div>
       <div className="flex flex-wrap items-center gap-3">
         <SimulationLabel />
-        {st ? (
+        {st && !hasEpoch(st.token) ? (
+          <span className="text-sm text-unknown-text">No epoch yet</span>
+        ) : st ? (
           <span className="text-sm text-muted">
             Epoch <span className="font-mono text-fg">{Number(st.token.epochId).toLocaleString("en-US")}</span> · checked{" "}
             <span className="font-mono text-fg">{now === 0 ? "just now" : `${formatAge(secondsBetween(st.token.updatedAt, now))} ago`}</span>

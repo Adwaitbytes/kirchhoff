@@ -5,14 +5,14 @@ import { Activity, Cpu, RefreshCw, Server, ShieldCheck, Workflow } from "lucide-
 import type { CreRun, OpsResponse, ReasonCode } from "@/lib/api/types";
 import { useNow, useOps } from "@/lib/api/hooks";
 import { CHAINS } from "@/lib/chains";
-import { blockUrl } from "@/lib/explorer";
+import { blockUrl, txRefUrl } from "@/lib/explorer";
 import { formatAge, formatTime, secondsBetween } from "@/lib/format";
 import { Banner } from "@/components/kh/banner";
 import { EmptyState, Panel, PanelHeader } from "@/components/kh/panel";
 import { TxLink, Verifiable } from "@/components/kh/links";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Segmented } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
 const WORKFLOW_LABEL: Record<CreRun["workflow"], string> = {
@@ -29,13 +29,44 @@ const OUTCOME_STYLE: Record<CreRun["outcome"], string> = {
   noop: "text-muted",
 };
 
-function Stat({ label, value, unit, hint, testId, tone = "fg" }: { label: string; value: string; unit?: string; hint?: string; testId?: string; tone?: "fg" | "conserved" | "broken" }) {
+/** Only a real http(s) URL counts as a public source; anything else is marked, never faked as a link. */
+function publicUrl(url: string | null | undefined): string | null {
+  return url && /^https?:\/\//.test(url) ? url : null;
+}
+
+/**
+ * Every Ops figure goes through this: a link to the source it was computed from (verdict rows,
+ * Judge /metrics, an explorer block or tx), or a plain number explicitly marked "not public".
+ */
+function Fig({ href, label, children, className }: { href: string | null; label: string; children: React.ReactNode; className?: string }) {
+  if (href) {
+    return (
+      <Verifiable href={href} label={label} className={className ?? ""}>
+        <span data-figure="">{children}</span>
+      </Verifiable>
+    );
+  }
+  return (
+    <span data-figure="" data-not-public="" title={`${label}. Source not public`} className={className}>
+      {children}
+    </span>
+  );
+}
+
+function NotPublic() {
+  return <span className="ml-1.5 font-sans text-2xs font-normal tracking-normal text-subtle">not public</span>;
+}
+
+function Stat({ label, value, unit, hint, testId, tone = "fg", href, source }: { label: string; value: string; unit?: string; hint?: string; testId?: string; tone?: "fg" | "conserved" | "broken"; href: string | null; source: string }) {
   return (
     <div className="relative overflow-hidden rounded-lg border border-wire bg-inset px-4 py-3.5 shadow-[inset_0_1px_0_0_rgb(255_255_255/0.03)]" data-testid={testId}>
       <p className="text-xs text-muted">{label}</p>
       <p className={cn("mt-1.5 font-mono text-2xl font-medium leading-none tracking-[-0.03em] tnum", tone === "conserved" ? "text-conserved" : tone === "broken" ? "text-broken" : "text-fg")}>
-        {value}
+        <Fig href={href} label={`${label}, ${source}`}>
+          {value}
+        </Fig>
         {unit ? <span className="ml-1 font-sans text-base font-normal tracking-normal text-muted">{unit}</span> : null}
+        {href ? null : <NotPublic />}
       </p>
       {hint ? <p className="mt-2 text-xs text-subtle">{hint}</p> : null}
     </div>
@@ -82,12 +113,21 @@ function Cells({ ops }: { ops: OpsResponse }) {
                 <dt className="text-muted">Region</dt>
                 <dd className="text-right font-mono text-fg">{c.region}</dd>
                 <dt className="text-muted">Heartbeat</dt>
-                <dd className="text-right font-mono text-fg tnum">{now === 0 ? "" : `${formatAge(secondsBetween(c.lastHeartbeatAt, now))} ago`}</dd>
+                <dd className="text-right font-mono text-fg tnum">
+                  <Fig href={publicUrl(c.metricsUrl)} label={`${c.name} heartbeat, from its Judge /metrics`}>
+                    {now === 0 ? "" : `${formatAge(secondsBetween(c.lastHeartbeatAt, now))} ago`}
+                  </Fig>
+                </dd>
                 <dt className="text-muted">Policy transitions</dt>
-                <dd className="text-right font-mono text-fg tnum">{c.policyTransitions.toLocaleString("en-US")}</dd>
+                <dd className="text-right font-mono text-fg tnum">
+                  <Fig href={publicUrl(c.metricsUrl)} label={`${c.name} policy transitions, from its Judge /metrics`}>
+                    {c.policyTransitions.toLocaleString("en-US")}
+                  </Fig>
+                </dd>
                 <dt className="text-muted">Version</dt>
                 <dd className="text-right font-mono text-subtle">{c.version}</dd>
               </dl>
+              {publicUrl(c.metricsUrl) ? null : <p className="mt-2 text-2xs text-subtle">Metrics endpoint not public</p>}
             </li>
           ))}
         </ul>
@@ -101,6 +141,7 @@ function Verdicts({ ops }: { ops: OpsResponse }) {
   const entries = (Object.entries(ops.verdictCounts.byReason) as [ReasonCode, number][]).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
   const max = Math.max(1, ...entries.map(([, n]) => n));
   const total = ops.verdictCounts.pass + ops.verdictCounts.fail;
+  const src = publicUrl(ops.sources.verdicts);
   return (
     <Panel aria-labelledby="verdicts-title">
       <PanelHeader
@@ -108,17 +149,20 @@ function Verdicts({ ops }: { ops: OpsResponse }) {
         title="Verdicts"
         meta={`Last ${Math.round(ops.windowSeconds / 60)} min`}
         actions={
-          <Tabs value={view} onValueChange={(v) => setView(v === "table" ? "table" : "bars")}>
-            <TabsList label="Verdict breakdown view">
-              <TabsTrigger value="bars">Bars</TabsTrigger>
-              <TabsTrigger value="table">Table</TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <Segmented
+            label="Verdict breakdown view"
+            value={view}
+            onChange={setView}
+            options={[
+              { value: "bars", label: "Bars" },
+              { value: "table", label: "Table" },
+            ]}
+          />
         }
       />
       <div className="grid grid-cols-2 gap-3 p-4 pb-2">
-        <Stat label="PASS" value={ops.verdictCounts.pass.toLocaleString("en-US")} tone="conserved" />
-        <Stat label="FAIL" value={ops.verdictCounts.fail.toLocaleString("en-US")} tone={ops.verdictCounts.fail > 0 ? "broken" : "fg"} />
+        <Stat label="PASS" value={ops.verdictCounts.pass.toLocaleString("en-US")} tone="conserved" href={src} source="counted from the verdict rows" />
+        <Stat label="FAIL" value={ops.verdictCounts.fail.toLocaleString("en-US")} tone={ops.verdictCounts.fail > 0 ? "broken" : "fg"} href={src} source="counted from the verdict rows" />
       </div>
       {total === 0 ? (
         <EmptyState title="No verdicts in this window yet." />
@@ -130,7 +174,9 @@ function Verdicts({ ops }: { ops: OpsResponse }) {
               <span className="h-2 overflow-hidden rounded-full bg-inset" aria-hidden="true">
                 <span className={cn("block h-full rounded-full", reason === "OK" ? "bg-conserved/80" : "bg-broken/80")} style={{ width: `${Math.max(2, (n / max) * 100)}%` }} />
               </span>
-              <span className="font-mono text-fg tnum">{n.toLocaleString("en-US")}</span>
+              <Fig href={src} label={`${reason} count, from the verdict rows`} className="font-mono text-fg tnum">
+                {n.toLocaleString("en-US")}
+              </Fig>
             </li>
           ))}
         </ul>
@@ -148,8 +194,16 @@ function Verdicts({ ops }: { ops: OpsResponse }) {
             {entries.map(([reason, n]) => (
               <tr key={reason} className="border-b border-wire/60 last:border-0">
                 <td className="py-2 pl-4 font-mono text-muted">{reason}</td>
-                <td className="px-3 text-right font-mono text-fg">{n.toLocaleString("en-US")}</td>
-                <td className="py-2 pr-4 text-right font-mono text-muted">{((n / total) * 100).toFixed(1)}%</td>
+                <td className="px-3 text-right font-mono text-fg">
+                  <Fig href={src} label={`${reason} count, from the verdict rows`}>
+                    {n.toLocaleString("en-US")}
+                  </Fig>
+                </td>
+                <td className="py-2 pr-4 text-right font-mono text-muted">
+                  <Fig href={src} label={`${reason} share, from the verdict rows`}>
+                    {((n / total) * 100).toFixed(1)}%
+                  </Fig>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -160,6 +214,7 @@ function Verdicts({ ops }: { ops: OpsResponse }) {
 }
 
 function Rpc({ ops }: { ops: OpsResponse }) {
+  const metrics = publicUrl(ops.sources.metrics[0]);
   return (
     <Panel aria-labelledby="rpc-title">
       <PanelHeader id="rpc-title" title="RPC agreement" meta="Two independent providers per chain. Disagreement fails closed" />
@@ -171,7 +226,9 @@ function Rpc({ ops }: { ops: OpsResponse }) {
             <li key={r.chain} className="space-y-2.5 px-4 py-3.5">
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <span className="text-sm font-medium text-fg">{CHAINS[r.chain].name}</span>
-                <span className={cn("ml-auto font-mono text-sm tnum", full ? "text-conserved" : "text-drift")}>{pct.toFixed(pct === 100 ? 0 : 1)}%</span>
+                <Fig href={metrics} label={`${CHAINS[r.chain].name} RPC agreement, from Judge /metrics`} className={cn("ml-auto font-mono text-sm tnum", full ? "text-conserved" : "text-drift")}>
+                  {pct.toFixed(pct === 100 ? 0 : 1)}%
+                </Fig>
                 <span className="text-xs text-muted">agree</span>
               </div>
               <div className="h-1.5 overflow-hidden rounded-full bg-inset" aria-hidden="true">
@@ -183,10 +240,12 @@ function Rpc({ ops }: { ops: OpsResponse }) {
                     <span className={cn("size-1.5 shrink-0 rounded-full", p.healthy ? "bg-conserved" : "bg-broken")} aria-hidden="true" />
                     <span className="font-medium text-fg">{p.name}</span>
                     <span className="sr-only">{p.healthy ? "healthy" : "unhealthy"}</span>
-                    <Verifiable href={blockUrl(r.chain, p.head)} label={`${p.name} head block on ${CHAINS[r.chain].name}`} className="ml-auto font-mono text-muted">
+                    <Fig href={blockUrl(r.chain, p.head)} label={`${p.name} head block on ${CHAINS[r.chain].name}`} className="ml-auto font-mono text-muted">
                       #{Number(p.head).toLocaleString("en-US")}
-                    </Verifiable>
-                    <span className="font-mono text-subtle tnum">{p.latencyMs}ms</span>
+                    </Fig>
+                    <Fig href={metrics} label={`${p.name} read latency, from Judge /metrics`} className="font-mono text-subtle tnum">
+                      {p.latencyMs}ms
+                    </Fig>
                   </li>
                 ))}
               </ul>
@@ -217,7 +276,9 @@ function Runs({ ops }: { ops: OpsResponse }) {
                 <p className="flex flex-wrap gap-x-3 text-muted">
                   <span className="font-mono">{formatTime(r.triggeredAt)}</span>
                   <span>{r.trigger}</span>
-                  <span className="font-mono tnum">{r.durationMs.toLocaleString("en-US")}ms</span>
+                  <Fig href={r.reportTxs[0] ? txRefUrl(r.reportTxs[0]) : null} label={`${WORKFLOW_LABEL[r.workflow]} run duration, report transaction`} className="font-mono tnum">
+                    {r.durationMs.toLocaleString("en-US")}ms
+                  </Fig>
                 </p>
                 {r.reportTxs.length ? (
                   <div className="flex flex-wrap gap-2">
@@ -248,10 +309,20 @@ function Runs({ ops }: { ops: OpsResponse }) {
                     <td className="py-2.5 pl-4 font-mono text-muted">{formatTime(r.triggeredAt)}</td>
                     <td className="px-3 text-fg">
                       {WORKFLOW_LABEL[r.workflow]}
-                      <span className="ml-2 font-mono text-subtle">{r.runId.slice(0, 12)}</span>
+                      {r.reportTxs[0] ? (
+                        <Verifiable href={txRefUrl(r.reportTxs[0])} label={`Run ${r.runId} report transaction`} className="ml-2 font-mono text-subtle">
+                          {r.runId.slice(0, 12)}
+                        </Verifiable>
+                      ) : (
+                        <span className="ml-2 font-mono text-subtle">{r.runId.slice(0, 12)}</span>
+                      )}
                     </td>
                     <td className="px-3 text-muted">{r.trigger}</td>
-                    <td className="px-3 text-right font-mono text-fg">{r.durationMs.toLocaleString("en-US")}ms</td>
+                    <td className="px-3 text-right font-mono text-fg">
+                      <Fig href={r.reportTxs[0] ? txRefUrl(r.reportTxs[0]) : null} label={`${WORKFLOW_LABEL[r.workflow]} run duration, report transaction`}>
+                        {r.durationMs.toLocaleString("en-US")}ms
+                      </Fig>
+                    </td>
                     <td className={cn("px-3 font-mono font-medium", OUTCOME_STYLE[r.outcome])}>{r.outcome}</td>
                     <td className="py-2.5 pr-4">
                       {r.reportTxs.length ? (
@@ -337,9 +408,9 @@ export function VerifierOps() {
                 <span className="text-xs text-muted">POST /v1/evaluate · budget 2,000ms · target p99 under 300ms</span>
               </div>
               <div className="grid gap-3 sm:grid-cols-3">
-                <Stat label="p50" value={data.judge.samples === 0 ? "n/a" : data.judge.p50Ms.toLocaleString("en-US")} unit={data.judge.samples === 0 ? "" : "ms"} {...(data.judge.samples === 0 ? { hint: "No Judge samples yet" } : {})} />
-                <Stat label="p99" value={data.judge.samples === 0 ? "n/a" : data.judge.p99Ms.toLocaleString("en-US")} unit={data.judge.samples === 0 ? "" : "ms"} tone={data.judge.samples === 0 ? "fg" : data.judge.p99Ms < 300 ? "conserved" : "broken"} hint={data.judge.samples === 0 ? "No Judge samples yet" : data.judge.p99Ms < 300 ? "Inside target" : "Over target"} />
-                <Stat label="Samples" value={data.judge.samples.toLocaleString("en-US")} hint={`Last ${Math.round(data.windowSeconds / 60)} min`} />
+                <Stat href={publicUrl(data.sources.verdicts)} source="computed from the verdict rows" label="p50" value={data.judge.samples === 0 ? "n/a" : data.judge.p50Ms.toLocaleString("en-US")} unit={data.judge.samples === 0 ? "" : "ms"} {...(data.judge.samples === 0 ? { hint: "No Judge samples yet" } : {})} />
+                <Stat href={publicUrl(data.sources.verdicts)} source="computed from the verdict rows" label="p99" value={data.judge.samples === 0 ? "n/a" : data.judge.p99Ms.toLocaleString("en-US")} unit={data.judge.samples === 0 ? "" : "ms"} tone={data.judge.samples === 0 ? "fg" : data.judge.p99Ms < 300 ? "conserved" : "broken"} hint={data.judge.samples === 0 ? "No Judge samples yet" : data.judge.p99Ms < 300 ? "Inside target" : "Over target"} />
+                <Stat href={publicUrl(data.sources.verdicts)} source="verdict rows in the window" label="Samples" value={data.judge.samples.toLocaleString("en-US")} hint={`Last ${Math.round(data.windowSeconds / 60)} min`} />
               </div>
             </section>
             <Cells ops={data} />

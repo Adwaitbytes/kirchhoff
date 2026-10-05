@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@xyflow/react/dist/base.css";
 
 @custom-variant light (&:where([data-theme="light"], [data-theme="light"] *));
 @custom-variant stage (&:where([data-stage="1"], [data-stage="1"] *));
@@ -26,6 +27,7 @@
   --status-recovering: #60a5fa;
   --status-unknown: #6b7280;
   --status-unknown-text: #8b93a0;
+  --status-drift-text: #fbbf24;
   --on-status: #0b0d10;
   --focus-ring: #7dd3fc;
   --shadow-panel: 0 1px 0 0 rgb(255 255 255 / 0.03) inset, 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px -12px rgb(0 0 0 / 0.6);
@@ -62,6 +64,7 @@
   --status-recovering: #1d4ed8;
   --status-unknown: #6b7280;
   --status-unknown-text: #6b7280;
+  --status-drift-text: #92400e;
   --on-status: #ffffff;
   --focus-ring: #0369a1;
   --shadow-panel: 0 1px 2px rgb(16 24 40 / 0.04), 0 4px 16px -8px rgb(16 24 40 / 0.08);
@@ -107,6 +110,7 @@
   --color-recovering: var(--status-recovering);
   --color-unknown: var(--status-unknown);
   --color-unknown-text: var(--status-unknown-text);
+  --color-drift-text: var(--status-drift-text);
   --color-on-status: var(--on-status);
   --color-focus: var(--focus-ring);
 
@@ -246,10 +250,16 @@
     background-position: -8px -8px;
   }
 
+  /*
+   * Stale (PRD section 12): panels dim to 60%. The dim lands on graphics (wires, pulses, bars,
+   * chart) and color drains out of everything, while text keeps its AA contrast.
+   */
   .is-stale {
+    filter: grayscale(0.85);
+    transition: filter 300ms ease;
+  }
+  .is-stale :where(.react-flow__edges, .react-flow__edgelabel-renderer, .recharts-wrapper, [role="presentation"], .schematic-grid) {
     opacity: 0.6;
-    filter: saturate(0.6);
-    transition: opacity 300ms ease;
   }
 }
 

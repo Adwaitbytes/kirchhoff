@@ -3,7 +3,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useQuery, useQueryClient, type QueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { useApi } from "@/lib/api/provider";
-import type { StreamConnectionState } from "@/lib/api/client";
+import { ApiError, type StreamConnectionState } from "@/lib/api/client";
 import type {
   Bytes32,
   EpochsResponse,
@@ -86,6 +86,25 @@ export function useLabStatus() {
   const api = useApi();
   const hydrated = useHydrated();
   const q = useQuery({ queryKey: queryKeys.lab, queryFn: ({ signal }) => api.getLabStatus(signal), refetchInterval: 4_000 });
+  return hydrationSafe(q, hydrated);
+}
+
+/** Pending spec changes. A 404 (API without the route yet) reads as "none pending", never as an error banner. */
+export function useSpecProposals(token: string) {
+  const api = useApi();
+  const hydrated = useHydrated();
+  const q = useQuery({
+    queryKey: ["spec-proposals", token] as const,
+    queryFn: async ({ signal }) => {
+      try {
+        return await api.getSpecProposals(token, signal);
+      } catch (e) {
+        if (e instanceof ApiError && e.code === "NOT_FOUND") return null;
+        throw e;
+      }
+    },
+    refetchInterval: 30_000,
+  });
   return hydrationSafe(q, hydrated);
 }
 

@@ -52,7 +52,7 @@ export function VerifyOnchainButton({ status, chain }: { status: TokenStatusResp
   );
 }
 
-export function LedgerDrawer({ status, chain, onClose }: { status: TokenStatusResponse; chain: ChainKey | null; onClose: () => void }) {
+export function LedgerDrawer({ status, chain, onClose, returnFocusTo }: { status: TokenStatusResponse; chain: ChainKey | null; onClose: () => void; returnFocusTo?: HTMLElement | null }) {
   const c = chain ? status.chains.find((x) => x.chain === chain) : undefined;
   const d = status.token.decimals;
   const sym = status.token.symbol;
@@ -66,7 +66,7 @@ export function LedgerDrawer({ status, chain, onClose }: { status: TokenStatusRe
   return (
     <Sheet open={c !== undefined} onOpenChange={(o) => (!o ? onClose() : undefined)}>
       {c ? (
-        <SheetContent title={`${CHAINS[c.chain].name} ledger`} description={`${c.role === "home" ? "Home chain" : "Remote chain"} · ${c.confidence} confidence · pinned block ${Number(c.pinnedBlock.number).toLocaleString("en-US")}`}>
+        <SheetContent returnFocusTo={returnFocusTo ?? null} title={`${CHAINS[c.chain].name} ledger`} description={`${c.role === "home" ? "Home chain" : "Remote chain"} · ${c.confidence} confidence · pinned block ${Number(c.pinnedBlock.number).toLocaleString("en-US")}`}>
           <div className="space-y-6 px-5 py-5">
             {!c.read.ok ? (
               <Banner tone="error">

@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 /** Every demo element is labeled "Testnet simulation" (house rule). */
 export function SimulationLabel({ className }: { className?: string }) {
   return (
-    <span className={cn("inline-flex h-6 items-center gap-1.5 rounded-md border border-drift/40 bg-drift/10 px-2 text-xs font-medium text-drift", className)}>
+    <span className={cn("inline-flex h-6 items-center gap-1.5 rounded-md border border-drift/40 bg-drift/10 px-2 text-xs font-medium text-drift-text", className)}>
       <FlaskConical className="size-3.5" aria-hidden="true" />
       Testnet simulation
     </span>

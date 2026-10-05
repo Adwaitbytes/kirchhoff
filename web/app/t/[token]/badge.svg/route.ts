@@ -1,6 +1,7 @@
 import type { TokenStatus, TokenStatusResponse } from "@/lib/api/types";
 import { FixtureWorld } from "@/lib/api/fixtures";
 import { API_URL } from "@/lib/api/client";
+import { hasEpoch } from "@/lib/status";
 import { formatAmount, parseWei } from "@/lib/format";
 
 /**
@@ -95,7 +96,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
   const { status, fixture } = TOKEN_RE.test(decoded) ? await loadStatus(token) : { status: null, fixture: false };
 
   let input: BadgeInput;
-  if (status && /^-?\d+$/.test(status.token.delta)) {
+  if (status && !hasEpoch(status.token)) {
+    // No epoch yet: the mirrored Δ is a placeholder, not a reading.
+    input = { token: status.token.symbol, status: "UNKNOWN", delta: null, note: fixture ? "fixture · no epoch" : "no epoch" };
+  } else if (status && /^-?\d+$/.test(status.token.delta)) {
     const t = status.token;
     const s: TokenStatus = t.stale && (t.status === "CONSERVED" || t.status === "DRIFT") ? "UNKNOWN" : t.status;
     input = {

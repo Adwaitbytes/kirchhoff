@@ -1,3 +1,4 @@
+import { LOOP_NOTE, isLoopRule, isZeroHex, scrubZeros } from "@/components/incident/loop";
 import type { ContainmentKind, EvidenceItem, IncidentResponse, ReasonCode } from "@/lib/api/types";
 import { PLAYBOOK_LABEL } from "@/lib/api/types";
 import { CHAINS } from "@/lib/chains";
@@ -44,7 +45,7 @@ export function sortedEvidence(items: readonly EvidenceItem[]): EvidenceItem[] {
 
 function evidenceLink(e: EvidenceItem): string | null {
   if (e.tx) return txRefUrl(e.tx);
-  if (e.messageId && e.kind === "refused_message") return ccipMessageUrl(e.messageId);
+  if (e.messageId && !isZeroHex(e.messageId) && e.kind === "refused_message") return ccipMessageUrl(e.messageId);
   if (e.blocks) return blockUrl(e.chain, e.blocks.to);
   return null;
 }
@@ -72,8 +73,16 @@ export function buildMarkdown(r: IncidentResponse, decimals: number): string {
   lines.push(`| Incident status | ${i.status} |`);
   lines.push(`| Δ before | [${signed(i.deltaBefore)}](${ledgerRead}) |`);
   lines.push(`| Δ after | [${signed(i.deltaAfter)}](${ledgerRead}) |`);
-  lines.push(`| Offending credit | [${amt(i.offending.amount)} on ${CHAINS[i.offending.chain].name}](${txRefUrl(i.offending.tx)}) via ${i.offending.bridge}, claimed source ${CHAINS[i.offending.claimedSrcChain].name} |`);
-  lines.push(`| Recipient | \`${i.offending.recipient}\` |`);
+  if (isLoopRule(i)) {
+    lines.push(`| Loop Rule deficit | [${amt(i.offending.amount)}](${txRefUrl(i.offending.tx)}), home BREACH report on ${CHAINS[i.offending.chain].name} |`);
+    lines.push(`| Recipient | n/a |`);
+    lines.push(`| Message id | n/a |`);
+    lines.push(`| Note | ${LOOP_NOTE} |`);
+  } else {
+    lines.push(`| Offending credit | [${amt(i.offending.amount)} on ${CHAINS[i.offending.chain].name}](${txRefUrl(i.offending.tx)}) via ${i.offending.bridge}, claimed source ${CHAINS[i.offending.claimedSrcChain].name} |`);
+    lines.push(`| Recipient | ${isZeroHex(i.offending.recipient) ? "n/a" : `\`${i.offending.recipient}\``} |`);
+    lines.push(`| Message id | ${isZeroHex(i.offending.messageId) ? "n/a" : `\`${i.offending.messageId}\``} |`);
+  }
   lines.push(`| Offending block time | ${formatDateTime(i.offendingBlockAt)} |`);
   lines.push(`| BROKEN onchain | ${firstBreach?.tx ? `[${formatDateTime(i.brokenAt)}](${txRefUrl(firstBreach.tx)})` : formatDateTime(i.brokenAt)} |`);
   lines.push(`| Time to BROKEN | ${formatSeconds(i.timeToBrokenSeconds)} |`);
@@ -84,7 +93,7 @@ export function buildMarkdown(r: IncidentResponse, decimals: number): string {
   for (const e of sortedEvidence(r.evidence)) {
     const link = evidenceLink(e);
     const range = e.blocks ? ` (blocks ${e.blocks.from} to ${e.blocks.to}, ${e.blocks.matches} matches)` : "";
-    lines.push(`- **${e.id}** ${formatDateTime(e.at)}, ${CHAINS[e.chain].name}: ${e.label}${range}${link ? ` [link](${link})` : ""}`);
+    lines.push(`- **${e.id}** ${formatDateTime(e.at)}, ${CHAINS[e.chain].name}: ${scrubZeros(e.label)}${range}${link ? ` [link](${link})` : ""}`);
   }
   lines.push("");
   lines.push("## Containment");
@@ -114,7 +123,7 @@ export function buildMarkdown(r: IncidentResponse, decimals: number): string {
     lines.push("");
     lines.push(`Generator: ${r.narrative.generator === "model" ? r.narrative.model : `template (${r.narrative.model})`}, ${formatDateTime(r.narrative.generatedAt)}.`);
     lines.push("");
-    for (const s of r.narrative.summary) lines.push(`- ${s.text} [${s.citations.join(", ")}]`);
+    for (const s of r.narrative.summary) lines.push(`- ${scrubZeros(s.text)} [${s.citations.join(", ")}]`);
     lines.push("");
     lines.push("### Next steps (fixed playbook)");
     lines.push("");
@@ -175,10 +184,21 @@ export async function buildPdf(r: IncidentResponse, decimals: number): Promise<B
     ["Incident", i.id],
     ["Delta before", signed(i.deltaBefore)],
     ["Delta after", signed(i.deltaAfter)],
-    ["Offending credit", `${amt(i.offending.amount)} on ${CHAINS[i.offending.chain].name} via ${i.offending.bridge}`],
-    ["Offending tx", i.offending.tx.hash],
-    ["Claimed source", CHAINS[i.offending.claimedSrcChain].name],
-    ["Recipient", i.offending.recipient],
+    ...(isLoopRule(i)
+      ? ([
+          ["Loop Rule deficit", amt(i.offending.amount)],
+          ["Home BREACH report", i.offending.tx.hash],
+          ["Recipient", "n/a"],
+          ["Message id", "n/a"],
+          ["Note", LOOP_NOTE],
+        ] as [string, string][])
+      : ([
+          ["Offending credit", `${amt(i.offending.amount)} on ${CHAINS[i.offending.chain].name} via ${i.offending.bridge}`],
+          ["Offending tx", i.offending.tx.hash],
+          ["Claimed source", CHAINS[i.offending.claimedSrcChain].name],
+          ["Recipient", isZeroHex(i.offending.recipient) ? "n/a" : i.offending.recipient],
+          ["Message id", isZeroHex(i.offending.messageId) ? "n/a" : i.offending.messageId],
+        ] as [string, string][])),
     ["Offending block", formatDateTime(i.offendingBlockAt)],
     ["BROKEN onchain", formatDateTime(i.brokenAt)],
     ["Time to BROKEN", formatSeconds(i.timeToBrokenSeconds)],
@@ -206,7 +226,7 @@ export async function buildPdf(r: IncidentResponse, decimals: number): Promise<B
   for (const e of sortedEvidence(r.evidence)) {
     const range = e.blocks ? ` Blocks ${e.blocks.from} to ${e.blocks.to}, ${e.blocks.matches} matches.` : "";
     text(`${e.id}  ${formatDateTime(e.at)}  ${CHAINS[e.chain].name}`, 9, { color: [107, 114, 128], mono: true });
-    text(`${e.label}.${range}`, 10, { gap: 1 });
+    text(`${scrubZeros(e.label)}.${range}`, 10, { gap: 1 });
     if (e.tx) text(txRefUrl(e.tx), 8, { mono: true, color: [15, 118, 110], gap: 5 });
     else y += 5;
   }
@@ -229,7 +249,7 @@ export async function buildPdf(r: IncidentResponse, decimals: number): Promise<B
     rule();
     text("AI summary. Verify against evidence.", 13, { bold: true, gap: 2 });
     text(`Generator: ${r.narrative.generator === "model" ? r.narrative.model : `template (${r.narrative.model})`}`, 9, { color: [107, 114, 128], gap: 6 });
-    for (const s of r.narrative.summary) text(`${s.text} [${s.citations.join(", ")}]`, 10, { gap: 3 });
+    for (const s of r.narrative.summary) text(`${scrubZeros(s.text)} [${s.citations.join(", ")}]`, 10, { gap: 3 });
     y += 4;
     text("Next steps (fixed playbook)", 11, { bold: true, gap: 2 });
     for (const n of r.narrative.nextSteps) text(`- ${PLAYBOOK_LABEL[n]}`, 10, { gap: 1 });

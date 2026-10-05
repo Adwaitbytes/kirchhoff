@@ -144,7 +144,7 @@ export function routeWires(groups: readonly WireGroup[], home: ChainKey, layout:
       const remote = g.a === home ? g.b : g.a;
       const siblings = (perRemote.get(remote) ?? []).sort((x, y) => (x.bridge === "ccip" ? -1 : y.bridge === "ccip" ? 1 : x.bridge.localeCompare(y.bridge)));
       const k = siblings.indexOf(g);
-      const spread = (k - (siblings.length - 1) / 2) * 26;
+      const spread = (k - (siblings.length - 1) / 2) * (compact ? 26 : 36);
       const p = positions[remote];
       if (!p) continue;
       const leftSide = p.x + NODE.chainW / 2 < escCx;
@@ -159,15 +159,17 @@ export function routeWires(groups: readonly WireGroup[], home: ChainKey, layout:
         continue;
       }
       const yStart = p.y + NODE.chainH / 2 + spread;
+      // Parallel wires label at different heights so their chips never touch.
+      const labelAt = siblings.length === 1 ? 0.5 : 0.25 + (0.5 * k) / (siblings.length - 1);
       const yEnd = escCy + spread;
       if (leftSide) {
         const xStart = p.x + NODE.chainW;
         const xm = xStart + 52 - spread;
-        set(g.id, [{ x: xStart, y: yStart }, { x: xm, y: yStart }, { x: xm, y: yEnd }, { x: escrow.x, y: yEnd }]);
+        set(g.id, [{ x: xStart, y: yStart }, { x: xm, y: yStart }, { x: xm, y: yEnd }, { x: escrow.x, y: yEnd }], { x: xm, y: yStart + (yEnd - yStart) * labelAt });
       } else {
         const xStart = p.x;
         const xm = xStart - 52 + spread;
-        set(g.id, [{ x: xStart, y: yStart }, { x: xm, y: yStart }, { x: xm, y: yEnd }, { x: escrow.x + NODE.escrowW, y: yEnd }]);
+        set(g.id, [{ x: xStart, y: yStart }, { x: xm, y: yStart }, { x: xm, y: yEnd }, { x: escrow.x + NODE.escrowW, y: yEnd }], { x: xm, y: yStart + (yEnd - yStart) * labelAt });
       }
     } else {
       const pa = positions[g.a];

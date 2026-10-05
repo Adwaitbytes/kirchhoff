@@ -45,7 +45,7 @@ function CitedText({ text, citations }: { text: string; citations: AskCitation[]
             target="_blank"
             rel="noopener noreferrer"
             title={c.label}
-            className="mx-0.5 inline-flex h-5 items-center rounded border border-wire bg-inset px-1.5 align-[1px] font-mono text-2xs text-muted hover:border-line-strong hover:text-fg"
+            className="mx-1 inline-flex h-6 min-w-6 items-center justify-center rounded border border-wire bg-inset px-1.5 align-[1px] font-mono text-2xs text-muted hover:border-line-strong hover:text-fg"
           >
             {c.n}
           </a>

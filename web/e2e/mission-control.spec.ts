@@ -40,7 +40,7 @@ test.describe("Mission Control", () => {
 
   test("Δ history has a data table toggle", async ({ page }) => {
     await page.goto("/app/tokens/kETH");
-    await page.getByRole("tab", { name: "Table" }).click();
+    await page.getByRole("button", { name: "Table" }).click();
     await expect(page.getByRole("table", { name: /Δ per epoch/ })).toBeVisible();
   });
 
@@ -102,5 +102,46 @@ test.describe("Mission Control", () => {
   test("replay is disabled when no incident was ever recorded", async ({ page }) => {
     await page.goto("/app/tokens/kETH");
     await expect(page.getByTestId("replay-last-incident")).toBeDisabled();
+  });
+});
+
+test.describe("Spec proposal alert", () => {
+  for (const route of ["/app/tokens/kETH?scenario=spec-pending", "/t/kETH?scenario=spec-pending"]) {
+    test(`shows a pending spec change with diff and timelock on ${route}`, async ({ page }) => {
+      await page.goto(route);
+      const alert = page.getByTestId("spec-proposal-alert");
+      await expect(alert).toBeVisible();
+      await expect(alert).toContainText("loosen");
+      await expect(page.getByTestId("spec-diff")).toContainText("rules.loop.tolerance_wei");
+      await expect(page.getByTestId("spec-timelock")).toContainText(/activates in \d+m/);
+    });
+  }
+
+  test("no alert when nothing is pending", async ({ page }) => {
+    await page.goto("/app/tokens/kETH");
+    await expect(page.getByTestId("status-pill")).toBeVisible();
+    await expect(page.getByTestId("spec-proposal-alert")).toHaveCount(0);
+  });
+});
+
+test.describe("No epoch yet", () => {
+  test("Mission Control says No epoch yet instead of a 1970 age", async ({ page }) => {
+    await page.goto("/app/tokens/kETH?scenario=no-epoch");
+    await expect(page.getByTestId("status-pill")).toHaveAttribute("data-status", "UNKNOWN");
+    await expect(page.getByTestId("epoch-none")).toHaveText("No epoch yet");
+    await expect(page.getByTestId("no-epoch-banner")).toContainText("No epoch recorded yet. Verdicts follow the token's stale policy (fail closed).");
+    await expect(page.getByTestId("delta-pending")).toBeVisible();
+    await expect(page.locator("body")).not.toContainText(/\d{4,}h \d+m/);
+  });
+
+  test("status page, badge and landing chip use the same wording", async ({ page, request }) => {
+    await page.goto("/t/kETH?scenario=no-epoch");
+    await expect(page.getByTestId("status-hero")).toContainText("no epoch recorded yet");
+    await expect(page.getByTestId("no-epoch-banner")).toBeVisible();
+    await expect(page.locator("body")).not.toContainText(/\d{4,}h \d+m/);
+    await page.goto("/?scenario=no-epoch");
+    await expect(page.getByTestId("landing-live-status")).toContainText("no epoch yet");
+    const svg = await (await request.get("/t/kETH/badge.svg")).text();
+    expect(svg).toContain("<svg");
   });
 });

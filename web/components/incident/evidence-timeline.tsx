@@ -1,5 +1,6 @@
 "use client";
 
+import { isZeroHex, scrubZeros } from "@/components/incident/loop";
 import { Ban, Lock, OctagonX, SearchX, ShieldX, Sigma, Zap, type LucideIcon } from "lucide-react";
 import type { EvidenceItem, EvidenceKind } from "@/lib/api/types";
 import { CHAINS } from "@/lib/chains";
@@ -56,7 +57,7 @@ export function EvidenceTimeline({ evidence, highlighted }: { evidence: readonly
                 <span className="text-muted">{CHAINS[e.chain].name}</span>
                 <span className="ml-auto rounded border border-wire bg-inset px-1.5 font-mono text-2xs text-subtle">{e.id}</span>
               </div>
-              <p className="mt-1 text-sm leading-snug text-fg">{e.label}</p>
+              <p className="mt-1 text-sm leading-snug text-fg">{scrubZeros(e.label)}</p>
               <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
                 {e.tx ? <TxLink tx={e.tx} showChain /> : null}
                 {e.blocks ? (
@@ -72,7 +73,7 @@ export function EvidenceTimeline({ evidence, highlighted }: { evidence: readonly
                     <span className={cn("ml-1 font-mono", e.blocks.matches === 0 ? "text-broken" : "text-conserved")}>{e.blocks.matches} matches</span>
                   </span>
                 ) : null}
-                {e.kind === "refused_message" && e.messageId ? (
+                {e.kind === "refused_message" && e.messageId && !isZeroHex(e.messageId) ? (
                   <ExternalLink href={ccipMessageUrl(e.messageId)} label={`CCIP message ${e.messageId}`} className="font-mono text-xs text-muted hover:text-fg">
                     <span className="mr-1 font-sans text-subtle">CCIP msg</span>
                     {shortHash(e.messageId)}

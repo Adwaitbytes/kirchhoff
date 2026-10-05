@@ -26,7 +26,6 @@
   "include": [
     "**/*.ts",
     "**/*.tsx",
-    ".next-dev/types/**/*.ts",
     ".next-e2e/types/**/*.ts",
     ".next/types/**/*.ts",
     "next-env.d.ts",
@@ -35,6 +34,9 @@
   "exclude": [
     "node_modules",
     ".next",
+    ".next-e2e",
+    ".next-dev",
+    ".next-api",
     "playwright-report",
     "test-results"
   ]

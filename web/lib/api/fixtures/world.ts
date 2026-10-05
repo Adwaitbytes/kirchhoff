@@ -23,6 +23,9 @@ import type {
   LabRun,
   LabStep,
   LabStepKey,
+  PendingSpecProposal,
+  ReplayPlanResponse,
+  ScoutProposal,
   Lane,
   LaneTransfer,
   MirrorMeta,
@@ -49,7 +52,11 @@ export type FixtureScenario =
   | "api-down"
   | "empty"
   | "loading"
-  | "lab-disabled";
+  | "lab-disabled"
+  | "recovered"
+  | "loop"
+  | "spec-pending"
+  | "no-epoch";
 
 export const FIXTURE_SCENARIOS: readonly FixtureScenario[] = [
   "live",
@@ -63,6 +70,10 @@ export const FIXTURE_SCENARIOS: readonly FixtureScenario[] = [
   "empty",
   "loading",
   "lab-disabled",
+  "recovered",
+  "loop",
+  "spec-pending",
+  "no-epoch",
 ];
 
 export function isFixtureScenario(v: string | null): v is FixtureScenario {
@@ -228,6 +239,7 @@ export class FixtureWorld {
   private timers: ReturnType<typeof setTimeout>[] = [];
   private intervals: ReturnType<typeof setInterval>[] = [];
   private labRun: LabRun | null = null;
+  pendingSpec = false;
   private started = false;
 
   constructor(scenario: FixtureScenario, now: number = Date.now()) {
@@ -267,6 +279,74 @@ export class FixtureWorld {
         }
         break;
       }
+      case "recovered": {
+        // Post-incident and conserved again: escrow refilled by the issuer, held messages replayable.
+        this.fastForwardLab(keth, this.anchorMs - 3 * 3_600_000);
+        keth.status = "CONSERVED";
+        keth.reason = "OK";
+        keth.frozen = false;
+        keth.offendingLaneId = null;
+        const home = keth.chains[HOME];
+        home.escrow = (home.escrow ?? 0n) + FORGED_AMOUNT;
+        home.supply -= FORGED_AMOUNT;
+        const inc = keth.activeIncidentId ? this.incidents.get(keth.activeIncidentId) : undefined;
+        if (inc) {
+          // An honest user's transfer that was held while the token was broken.
+          const at = this.anchorMs - 3 * 3_600_000 + 15_000;
+          const t = this.makeTransfer(keth, "ccip", ARB, BASE, at);
+          t.state = "refused";
+          const v = this.makeVerdict(keth, t, at, "FAIL", "TOKEN_QUARANTINED", "held while kETH was quarantined");
+          inc.refused.push(v);
+          inc.incident.status = "resolved";
+          inc.incident.resolvedAt = new Date(this.anchorMs - 2 * 3_600_000).toISOString();
+          inc.incident.recoveryEndsAt = new Date(this.anchorMs - 3_600_000).toISOString();
+        }
+        break;
+      }
+      case "loop": {
+        // A compromised minter mints with no message: only the Loop Rule (W2) sees it.
+        keth.chains[ARB].supply += u(25_000);
+        const inc = this.applyBreach(keth, this.anchorMs - 45_000);
+        inc.incident.reason = "LOOP_DEFICIT";
+        inc.incident.offending = {
+          ...inc.incident.offending,
+          chain: HOME,
+          bridge: "loop_rule",
+          recipient: "0x0000000000000000000000000000000000000000",
+          messageId: `0x${"0".repeat(64)}`,
+          amount: u(25_000).toString(),
+          claimedSrcChain: HOME,
+        };
+        inc.incident.deltaAfter = (-u(25_000)).toString();
+        const breachAt = this.anchorMs - 45_000;
+        inc.evidence = [
+          {
+            id: "ev-1",
+            kind: "epoch_report",
+            chain: HOME,
+            at: new Date(breachAt - 2_000).toISOString(),
+            label: "W2 read every chain at pinned blocks: remote supply exceeds escrow by 25,000 kETH, with no message behind it",
+            tx: this.clock.tx(HOME, "loop:epoch", breachAt - 2_000),
+            blocks: null,
+            messageId: null,
+          },
+          ...inc.evidence.filter((e) => e.kind === "breach_report").map((e) => ({ ...e, label: e.label.replace("DEBIT_NOT_FOUND", "LOOP_DEFICIT") })),
+        ];
+        keth.reason = "LOOP_DEFICIT";
+        break;
+      }
+      case "no-epoch":
+        // Freshly deployed: no epoch written yet. The API reports epochId "0" and updatedAt at the Unix epoch.
+        keth.status = "UNKNOWN";
+        keth.reason = "STATUS_STALE";
+        keth.stale = true;
+        keth.updatedAtMs = 0;
+        keth.epochs = [];
+        keth.verdicts = [];
+        break;
+      case "spec-pending":
+        this.pendingSpec = true;
+        break;
       case "drift":
         keth.status = "DRIFT";
         keth.reason = "FLOW_LIMIT";
@@ -337,7 +417,7 @@ export class FixtureWorld {
   start(): void {
     if (this.started) return;
     this.started = true;
-    if (this.scenario === "stale" || this.scenario === "empty" || this.scenario === "loading" || this.scenario === "api-down") return;
+    if (this.scenario === "stale" || this.scenario === "no-epoch" || this.scenario === "empty" || this.scenario === "loading" || this.scenario === "api-down") return;
     this.intervals.push(setInterval(() => this.tickTransfers(), TRANSFER_EVERY_MS));
     this.intervals.push(setInterval(() => this.tickEpochs(), EPOCH_MS));
     this.timers.push(setTimeout(() => this.tickTransfers(), 2_000));
@@ -968,7 +1048,7 @@ export class FixtureWorld {
       status: s.status,
       reason: s.reason,
       delta: this.delta(s).toString(),
-      epochId: (s.epochId + BigInt(s.epochs.length) - 1n).toString(),
+      epochId: s.epochs.length === 0 ? "0" : (s.epochId + BigInt(s.epochs.length) - 1n).toString(),
       updatedAt: new Date(s.updatedAtMs).toISOString(),
       stale: s.stale || Date.now() - s.updatedAtMs > STALENESS_SECONDS * 1000,
       activeIncidentId: s.activeIncidentId,
@@ -1076,6 +1156,96 @@ export class FixtureWorld {
       narrative: inc.narrative ? structuredClone(inc.narrative) : null,
       resolution: { chain: HOME, issuerSafe: ISSUER_SAFE, quarantineController: fxAddress(`quarantine:${HOME}`), canResolve: s.status === "QUARANTINED" },
       tokenStatus: s.status,
+    };
+  }
+
+  specProposals(symbol: string): PendingSpecProposal[] {
+    if (!this.pendingSpec || symbol !== "kETH") return [];
+    const proposedAt = this.anchorMs - 4 * 60_000;
+    return [
+      {
+        specHash: fxHash("kETH:spec:v2-pending"),
+        activeSpecHash: fxHash("kETH:spec:v1"),
+        state: "proposed",
+        proposeTx: this.clock.tx(HOME, "spec:propose:v2", proposedAt),
+        proposedAt: new Date(proposedAt).toISOString(),
+        activatesAt: new Date(proposedAt + 600_000).toISOString(),
+        timelockSeconds: 600,
+        proposer: ISSUER_SAFE,
+        diff: [
+          { path: "rules.loop.tolerance_wei", kind: "changed", before: '"0"', after: '"5000000000000000000000"', effect: "loosens" },
+          { path: "remotes[0].minters", kind: "changed", before: "[ccip_pool_arb, weakbridge_arb]", after: "[ccip_pool_arb, weakbridge_arb, minter_0x7a1c]", effect: "loosens" },
+          { path: "rules.staleness_seconds", kind: "changed", before: "120", after: "90", effect: "tightens" },
+        ],
+      },
+    ];
+  }
+
+  scoutProposals(symbol: string): ScoutProposal[] {
+    const at = new Date(this.anchorMs - 20 * 60_000).toISOString();
+    return [
+      {
+        id: "scout-1",
+        token: symbol,
+        kind: "unlisted_minter",
+        chain: BASE,
+        chainName: "Base Sepolia",
+        address: fxAddress("scout:minter:base"),
+        summary: "MINTER_ROLE granted on Base Sepolia to an address the spec does not list",
+        evidence: [{ label: "RoleGranted tx", href: `https://sepolia.basescan.org/tx/${fxHash("tx:scout:grant")}` }],
+        confidence: "high",
+        specPatch: "    minters: [ccip_pool_base, minter_0x7a1c]",
+        foundAt: at,
+        status: "open",
+      },
+      {
+        id: "scout-2",
+        token: symbol,
+        kind: "same_symbol",
+        chain: "ethereum-testnet-sepolia-optimism-1",
+        chainName: "OP Sepolia",
+        address: fxAddress("scout:same-symbol:op"),
+        summary: "An ERC-20 named kETH on OP Sepolia with no bridge link to the canonical token",
+        evidence: [{ label: "Contract on Blockscout", href: `https://optimism-sepolia.blockscout.com/address/${fxAddress("scout:same-symbol:op")}` }],
+        confidence: "low",
+        specPatch: null,
+        foundAt: at,
+        status: "open",
+      },
+    ];
+  }
+
+  replayPlan(id: Bytes32): ReplayPlanResponse | null {
+    const inc = this.incidents.get(id);
+    if (!inc) return null;
+    const s = this.tokens.get(inc.incident.token);
+    if (!s) return null;
+    const allowed = s.status === "CONSERVED";
+    const messages = inc.refused.map((v) => {
+      const tainted = inc.tainted.some((a) => a.toLowerCase() === v.sender.toLowerCase());
+      return {
+        messageId: v.messageId,
+        srcChain: v.srcChain,
+        dstChain: v.dstChain,
+        amount: v.amount,
+        sender: v.sender,
+        action: tainted ? ("skip" as const) : ("replay" as const),
+        note: tainted ? "Sender is tainted; the message stays held" : "Source debit verified; safe to execute",
+      };
+    });
+    return {
+      ...this.meta(),
+      incidentId: id,
+      allowed,
+      reason: allowed ? null : `kETH is ${s.status}. Held messages replay only once it is CONSERVED again.`,
+      tokenStatus: s.status,
+      issuerSafe: ISSUER_SAFE,
+      messages,
+      calls: allowed
+        ? messages
+            .filter((m) => m.action === "replay")
+            .map((m) => ({ chain: m.dstChain, to: fxAddress(`offramp:${m.dstChain}`), data: `0x${fxHash(`replay:${m.messageId}`).slice(2)}` as const, value: "0", description: `Manually execute ${m.messageId.slice(0, 10)} on the CCIP OffRamp` }))
+        : [],
     };
   }
 

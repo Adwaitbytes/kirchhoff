@@ -9,7 +9,7 @@ import { useNow, useTokens } from "@/lib/api/hooks";
 import { formatAge, formatAmount, parseWei, secondsBetween } from "@/lib/format";
 import { readContractUrl, txRefUrl } from "@/lib/explorer";
 import { usePrefs } from "@/lib/prefs";
-import { STATUS_STYLE } from "@/lib/status";
+import { STATUS_STYLE, hasEpoch } from "@/lib/status";
 import { TestnetBadge } from "@/components/kh/simulation";
 import { IncidentReplayButton } from "@/components/mission/incident-replay";
 import { Verifiable } from "@/components/kh/links";
@@ -77,6 +77,7 @@ export function StatusPill({ status }: { status: TokenStatusResponse }) {
 
 function StalenessTimer({ status }: { status: TokenStatusResponse }) {
   const now = useNow();
+  if (!hasEpoch(status.token)) return null;
   const age = now === 0 ? 0 : secondsBetween(status.token.updatedAt, now);
   const limit = status.stalenessSeconds;
   const frac = Math.min(1, age / limit);
@@ -123,16 +124,18 @@ export function MissionTopBar({ token, status, stream }: { token: string; status
       {status ? (
         <div className="order-last flex w-full flex-wrap items-center gap-x-4 gap-y-2 sm:order-none sm:w-auto">
           <StatusPill status={status} />
-          <span className="hidden text-sm text-muted sm:inline">
-            Epoch{" "}
-            {epochTx ? (
+          {epochTx && hasEpoch(status.token) ? (
+            <span className="hidden text-sm text-muted sm:inline">
+              Epoch{" "}
               <Verifiable href={txRefUrl(epochTx)} label={`Epoch ${status.epoch?.epochId} report transaction`} className="font-mono text-fg">
                 {Number(status.epoch?.epochId).toLocaleString("en-US")}
               </Verifiable>
-            ) : (
-              <span className="font-mono text-subtle">none</span>
-            )}
-          </span>
+            </span>
+          ) : (
+            <span className="text-sm text-unknown-text" data-testid="epoch-none">
+              No epoch yet
+            </span>
+          )}
           <StalenessTimer status={status} />
         </div>
       ) : (
