@@ -1,0 +1,628 @@
+@import "tailwindcss";
+
+@custom-variant light (&:where([data-theme="light"], [data-theme="light"] *));
+@custom-variant stage (&:where([data-stage="1"], [data-stage="1"] *));
+
+/*
+ * Design tokens (PRD section 12). Dark is the default theme. Values in the PRD token table are
+ * used verbatim; the extra neutrals (fg, raised, inset, line-strong) are derived to hold
+ * WCAG 2.2 AA on bg/panel in both themes. `--status-unknown-text` exists because the PRD's
+ * #6B7280 is 3.8:1 on the dark panel, so text uses a lifted grey while fills keep the token.
+ */
+:root {
+  --bg-base: #0b0d10;
+  --bg-panel: #12151a;
+  --bg-raised: #181c22;
+  --bg-inset: #0e1115;
+  --line-wire: #2a313b;
+  --line-strong: #3a4350;
+  --fg: #e7eaee;
+  --fg-muted: #9aa3af;
+  --fg-subtle: #7d8693;
+  --status-conserved: #2dd4bf;
+  --status-drift: #fbbf24;
+  --status-broken: #f43f5e;
+  --status-quarantined: #a78bfa;
+  --status-recovering: #60a5fa;
+  --status-unknown: #6b7280;
+  --status-unknown-text: #8b93a0;
+  --on-status: #0b0d10;
+  --focus-ring: #7dd3fc;
+  --shadow-panel: 0 1px 0 0 rgb(255 255 255 / 0.03) inset, 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px -12px rgb(0 0 0 / 0.6);
+  --shadow-pop: 0 1px 0 0 rgb(255 255 255 / 0.05) inset, 0 12px 32px -8px rgb(0 0 0 / 0.7), 0 2px 6px rgb(0 0 0 / 0.5);
+  --grid-dot: rgb(154 163 175 / 0.13);
+  --panel-top: #161a20;
+  --panel-highlight: rgb(255 255 255 / 0.05);
+  --ambient-a: rgb(45 212 191 / 0.07);
+  --ambient-b: rgb(96 165 250 / 0.05);
+  --grain-opacity: 0.05;
+
+  /* Type scale 12/14/16/20/28/48/72, multiplied by 1.2 in stage mode. */
+  --type-scale: 1;
+  /* Motion multiplier: 1.3 in stage mode so the recording reads clearly. */
+  --motion-scale: 1;
+
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg-base: #fafaf9;
+  --bg-panel: #ffffff;
+  --bg-raised: #f4f4f3;
+  --bg-inset: #f5f5f4;
+  --line-wire: #d6d9de;
+  --line-strong: #b8bdc5;
+  --fg: #0b0d10;
+  --fg-muted: #4b5563;
+  --fg-subtle: #5f6773;
+  --status-conserved: #0f766e;
+  --status-drift: #b45309;
+  --status-broken: #be123c;
+  --status-quarantined: #6d28d9;
+  --status-recovering: #1d4ed8;
+  --status-unknown: #6b7280;
+  --status-unknown-text: #6b7280;
+  --on-status: #ffffff;
+  --focus-ring: #0369a1;
+  --shadow-panel: 0 1px 2px rgb(16 24 40 / 0.04), 0 4px 16px -8px rgb(16 24 40 / 0.08);
+  --shadow-pop: 0 2px 4px rgb(16 24 40 / 0.06), 0 16px 40px -12px rgb(16 24 40 / 0.18);
+  --grid-dot: rgb(75 85 99 / 0.16);
+  --panel-top: #ffffff;
+  --panel-highlight: rgb(255 255 255 / 1);
+  --ambient-a: rgb(15 118 110 / 0.06);
+  --ambient-b: rgb(29 78 216 / 0.04);
+  --grain-opacity: 0.035;
+  color-scheme: light;
+}
+
+[data-breach="1"] {
+  --ambient-a: rgb(244 63 94 / 0.1);
+  --ambient-b: rgb(244 63 94 / 0.04);
+}
+
+[data-theme="light"][data-breach="1"] {
+  --ambient-a: rgb(190 18 60 / 0.07);
+  --ambient-b: rgb(190 18 60 / 0.03);
+}
+
+[data-stage="1"] {
+  --type-scale: 1.2;
+  --motion-scale: 1.3;
+}
+
+@theme inline {
+  --color-canvas: var(--bg-base);
+  --color-panel: var(--bg-panel);
+  --color-raised: var(--bg-raised);
+  --color-inset: var(--bg-inset);
+  --color-wire: var(--line-wire);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-muted: var(--fg-muted);
+  --color-subtle: var(--fg-subtle);
+  --color-conserved: var(--status-conserved);
+  --color-drift: var(--status-drift);
+  --color-broken: var(--status-broken);
+  --color-quarantined: var(--status-quarantined);
+  --color-recovering: var(--status-recovering);
+  --color-unknown: var(--status-unknown);
+  --color-unknown-text: var(--status-unknown-text);
+  --color-on-status: var(--on-status);
+  --color-focus: var(--focus-ring);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, "SFMono-Regular", monospace;
+
+  --text-2xs: calc(11px * var(--type-scale));
+  --text-2xs--line-height: 1.35;
+  --text-xs: calc(12px * var(--type-scale));
+  --text-xs--line-height: 1.4;
+  --text-sm: calc(14px * var(--type-scale));
+  --text-sm--line-height: 1.5;
+  --text-base: calc(16px * var(--type-scale));
+  --text-base--line-height: 1.5;
+  --text-lg: calc(20px * var(--type-scale));
+  --text-lg--line-height: 1.35;
+  --text-xl: calc(28px * var(--type-scale));
+  --text-xl--line-height: 1.2;
+  --text-2xl: calc(48px * var(--type-scale));
+  --text-2xl--line-height: 1.05;
+  --text-3xl: calc(72px * var(--type-scale));
+  --text-3xl--line-height: 1;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  --shadow-panel: var(--shadow-panel);
+  --shadow-pop: var(--shadow-pop);
+
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-in-out-quart: cubic-bezier(0.76, 0, 0.24, 1);
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--line-wire);
+  }
+
+  html {
+    background: var(--bg-base);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background:
+      radial-gradient(1200px 600px at 12% -10%, var(--ambient-a), transparent 60%),
+      radial-gradient(900px 600px at 100% 110%, var(--ambient-b), transparent 60%),
+      var(--bg-base);
+    background-attachment: fixed;
+    transition: background 600ms ease;
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: 1.5;
+    font-feature-settings: "cv11", "ss01", "ss03";
+  }
+
+  /* Grid items never force their track wider than the viewport. */
+  :where(.grid) > * {
+    min-width: 0;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--status-conserved) 30%, transparent);
+  }
+
+  [data-stage="1"] body {
+    cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='36' height='36' viewBox='0 0 24 24'><path d='M4 2 L4 19 L8.5 14.8 L11.6 21.6 L14.4 20.4 L11.4 13.7 L17.6 13.7 Z' fill='white' stroke='black' stroke-width='1.4' stroke-linejoin='round'/></svg>") 4 2, auto;
+  }
+
+  [data-stage="1"] a,
+  [data-stage="1"] button,
+  [data-stage="1"] [role="button"] {
+    cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='36' height='36' viewBox='0 0 24 24'><path d='M4 2 L4 19 L8.5 14.8 L11.6 21.6 L14.4 20.4 L11.4 13.7 L17.6 13.7 Z' fill='white' stroke='black' stroke-width='1.4' stroke-linejoin='round'/></svg>") 4 2, pointer;
+  }
+
+  [data-stage="1"] [data-dev-control] {
+    display: none !important;
+  }
+}
+
+@layer utilities {
+  pre,
+  code,
+  .font-mono {
+    font-variant-ligatures: none;
+  }
+
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum", "zero";
+  }
+
+  .panel {
+    background: linear-gradient(180deg, var(--panel-top) 0%, var(--bg-panel) 140px);
+    border: 1px solid var(--line-wire);
+    border-radius: 8px;
+    box-shadow: inset 0 1px 0 0 var(--panel-highlight), var(--shadow-panel);
+  }
+
+  .surface-glass {
+    background: color-mix(in oklab, var(--bg-panel) 78%, transparent);
+    backdrop-filter: blur(14px) saturate(1.2);
+    -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  }
+
+  .grain::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    pointer-events: none;
+    opacity: var(--grain-opacity);
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 1 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    mix-blend-mode: overlay;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .schematic-grid {
+    background-image: radial-gradient(var(--grid-dot) 1px, transparent 1px);
+    background-size: 16px 16px;
+    background-position: -8px -8px;
+  }
+
+  .is-stale {
+    opacity: 0.6;
+    filter: saturate(0.6);
+    transition: opacity 300ms ease;
+  }
+}
+
+/* React Flow: strip library chrome so the map reads as a schematic. */
+.react-flow__attribution {
+  background: transparent !important;
+  font-size: 10px;
+  opacity: 0.5;
+}
+.react-flow__attribution a {
+  color: var(--fg-subtle) !important;
+}
+.react-flow__node:focus-visible {
+  outline: none;
+}
+.react-flow__edge:focus-visible {
+  outline: none;
+}
+.react-flow__node-chain,
+.react-flow__node-escrow {
+  pointer-events: all !important;
+}
+.react-flow__node-frame {
+  pointer-events: none !important;
+}
+.react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+@keyframes skeleton-sheen {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--bg-raised) 0%, color-mix(in oklab, var(--bg-raised) 70%, var(--line-strong)) 50%, var(--bg-raised) 100%);
+  background-size: 200% 100%;
+  animation: skeleton-sheen 1.6s linear infinite;
+  border-radius: 4px;
+}
+
+@keyframes wire-flow {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+@keyframes junction-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.04);
+  }
+}
+
+@keyframes breach-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    transform: translateY(6px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes travel {
+  0% {
+    left: 0%;
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
+  }
+  100% {
+    left: calc(100% - 8px);
+    opacity: 0;
+  }
+}
+
+@keyframes overflow-swell {
+  0%,
+  35% {
+    width: 0%;
+    opacity: 0;
+  }
+  50%,
+  78% {
+    width: 26%;
+    opacity: 1;
+  }
+  95%,
+  100% {
+    width: 0%;
+    opacity: 0;
+  }
+}
+
+@keyframes hero-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+@keyframes sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(400%);
+  }
+}
+
+/* Scroll reveal: visible unless the browser can drive it from scroll and motion is allowed. */
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    .reveal {
+      animation: reveal-in linear forwards;
+      animation-timeline: view();
+      animation-range: entry var(--reveal-offset, 0%) entry calc(var(--reveal-offset, 0%) + 45%);
+    }
+  }
+}
+
+@keyframes dash-flow {
+  to {
+    background-position: 18px 0;
+  }
+}
+
+@keyframes wire-flow-svg {
+  to {
+    stroke-dashoffset: -36;
+  }
+}
+
+@keyframes ok-glow {
+  0%,
+  60%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+  80% {
+    box-shadow: 0 0 18px -2px var(--status-conserved);
+  }
+}
+
+@keyframes search-back {
+  0% {
+    right: 0%;
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  45%,
+  100% {
+    right: calc(50% - 5px);
+    opacity: 0;
+  }
+}
+
+@keyframes stop-pop {
+  0%,
+  40% {
+    transform: translate(-50%, -50%) scale(0.4);
+    opacity: 0;
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.15);
+    opacity: 1;
+  }
+  58%,
+  88% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.85;
+  }
+}
+
+@keyframes readout-calm {
+  0%,
+  40% {
+    opacity: 1;
+  }
+  46%,
+  80% {
+    opacity: 0;
+  }
+  86%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes readout-break {
+  0%,
+  40% {
+    opacity: 0;
+  }
+  46%,
+  80% {
+    opacity: 1;
+  }
+  86%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Kelp Replay strip, one 10s cycle: forge 0-30%, break at 30%, contain 40%, escape refused 60-80%. */
+@keyframes strip-forge {
+  0% {
+    width: 0;
+    opacity: 1;
+  }
+  30% {
+    width: 50%;
+    opacity: 1;
+  }
+  88% {
+    width: 50%;
+    opacity: 1;
+  }
+  100% {
+    width: 50%;
+    opacity: 0;
+  }
+}
+
+@keyframes strip-contain {
+  0%,
+  38% {
+    transform: scaleX(0);
+    opacity: 1;
+  }
+  48%,
+  90% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scaleX(1);
+    opacity: 0;
+  }
+}
+
+@keyframes strip-escape {
+  0%,
+  58% {
+    right: 0;
+    opacity: 0;
+  }
+  62% {
+    opacity: 1;
+  }
+  72% {
+    right: calc(12.5% + 4px);
+    opacity: 1;
+    transform: scale(1);
+  }
+  78% {
+    right: calc(12.5% + 4px);
+    opacity: 0;
+    transform: scale(2.2);
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes strip-barrier {
+  0%,
+  66% {
+    opacity: 0;
+  }
+  70%,
+  92% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes station-on {
+  0% {
+    opacity: 0;
+  }
+  4%,
+  80% {
+    opacity: 1;
+  }
+  90%,
+  100% {
+    opacity: 0;
+  }
+}
