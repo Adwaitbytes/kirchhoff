@@ -14,12 +14,16 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - uses: foundry-rs/foundry-toolchain@v1
       - run: pnpm install --frozen-lockfile
+      - name: Build contracts (integration tests deploy them onto Anvil)
+        working-directory: contracts
+        run: npm ci && forge build
       - name: No AI in the veto path (PRD section 11)
         run: bash scripts/no-ai-in-veto-path.sh
       - run: pnpm -r lint
       - run: pnpm -r typecheck
-      - run: pnpm -r test
+      - run: pnpm -r --workspace-concurrency=2 test
       - name: Engine coverage gate (100% branches)
         run: pnpm --filter @kirchhoff/engine coverage
 
@@ -30,9 +34,8 @@ jobs:
         working-directory: contracts
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
       - uses: foundry-rs/foundry-toolchain@v1
+      - run: npm ci
       - run: forge fmt --check
       - run: forge build --sizes
       - run: forge test -vv
