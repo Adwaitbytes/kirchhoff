@@ -1,0 +1,30 @@
+{
+  "name": "@kirchhoff/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "KIRCHHOFF TypeScript SDK: status, live subscriptions, onchain verification and transfer dry runs",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types": "./src/api-types.ts",
+    "./chains": "./src/chains.ts",
+    "./abis": "./src/abis.ts",
+    "./deployments": "./src/deployments.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "viem": "^2.57.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.19.1",
+    "eslint": "^10.12.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.3"
+  }
+}

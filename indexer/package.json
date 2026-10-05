@@ -1,0 +1,38 @@
+{
+  "name": "@kirchhoff/indexer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "KIRCHHOFF read model indexer: mirrors onchain state of all three chains into Postgres (not in the veto path)",
+  "exports": {
+    ".": "./src/index.ts",
+    "./db": "./src/db.ts",
+    "./notifier": "./src/notifier.ts",
+    "./verdicts": "./src/verdicts.ts"
+  },
+  "bin": {
+    "kirchhoff-indexer": "./src/main.ts"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "migrate": "node src/migrate-cli.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@kirchhoff/engine": "workspace:*",
+    "@kirchhoff/sdk": "workspace:*",
+    "pg": "^8.23.1",
+    "viem": "^2.57.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.19.1",
+    "@types/pg": "^8.23.1",
+    "eslint": "^10.12.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.3"
+  }
+}

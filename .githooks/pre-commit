@@ -11,7 +11,8 @@ if [ -f .env ]; then
   staged="$(git diff --cached -U0)"
   while IFS='=' read -r name value; do
     case "$name" in *PRIVATE_KEY|*SECRET|*TOKEN|*API_KEY|*WEBHOOK_URL|DATABASE_URL*)
-      v="${value#0x}"
+      v="${value#0x}"; v="${v%\"}"; v="${v#\"}"
+      case "$v" in *localhost*|*127.0.0.1*) continue;; esac
       if [ ${#v} -ge 16 ] && grep -qF "$v" <<<"$staged"; then echo "pre-commit: staged diff contains the value of $name" >&2; exit 1; fi;;
     esac
   done < <(grep -E '^[A-Z0-9_]+=.+' .env)

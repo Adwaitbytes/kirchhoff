@@ -1,0 +1,34 @@
+{
+  "name": "@kirchhoff/ai",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "KIRCHHOFF AI layer: Spec Copilot, Incident Narrator, Topology Scout, Ask KIRCHHOFF. Drafts and explanations only, never in the veto path",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "eval": "node eval/run.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@kirchhoff/engine": "workspace:*",
+    "@kirchhoff/indexer": "workspace:*",
+    "@kirchhoff/sdk": "workspace:*",
+    "ajv": "^8.20.0",
+    "pg": "^8.23.1",
+    "viem": "^2.57.2",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.19.1",
+    "@types/pg": "^8.23.1",
+    "eslint": "^10.12.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.3"
+  }
+}

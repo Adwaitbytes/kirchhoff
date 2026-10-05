@@ -1,0 +1,33 @@
+{
+  "name": "@kirchhoff/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "KIRCHHOFF MCP server (stdio and Streamable HTTP). Read-only tools for AI agents",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "kirchhoff-mcp": "./src/stdio.ts"
+  },
+  "scripts": {
+    "start:stdio": "node src/stdio.ts",
+    "start:http": "node src/http.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@kirchhoff/sdk": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.19.1",
+    "eslint": "^10.12.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.3"
+  }
+}

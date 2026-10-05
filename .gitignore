@@ -20,3 +20,4 @@ api/api/
 deployments/local*
 deployments/wfs*
 contracts/broadcast/
+api/.vercel-stage/

@@ -1,0 +1,44 @@
+{
+  "name": "@kirchhoff/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "KIRCHHOFF public REST, WebSocket and SSE API (PRD section 13). Mirrors onchain state; never produces verdicts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "build:vercel": "node scripts/build-vercel.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "stage:vercel": "node scripts/build-vercel.mjs && node scripts/stage-vercel.mjs"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@fastify/rate-limit": "^11.2.0",
+    "@fastify/websocket": "^11.3.1",
+    "@kirchhoff/ai": "workspace:*",
+    "@kirchhoff/engine": "workspace:*",
+    "@kirchhoff/indexer": "workspace:*",
+    "@kirchhoff/mcp": "workspace:*",
+    "@kirchhoff/sdk": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "fastify": "^5.12.5",
+    "pg": "^8.23.1",
+    "viem": "^2.57.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.19.1",
+    "@types/pg": "^8.23.1",
+    "@types/ws": "^8.18.2",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.12.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.3",
+    "ws": "^8.22.0"
+  }
+}
