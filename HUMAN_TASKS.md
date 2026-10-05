@@ -7,7 +7,7 @@ Only a person can do these. Everything else is automated.
 - [x] Seed funds: 0.05 Sepolia ETH from the Google Cloud faucet; 0.01 ETH bridged to each of Arbitrum Sepolia and Base Sepolia through the canonical bridges. CCIP fees are paid in native ETH, so LINK is optional.
 - [ ] Optional headroom: import `DEPLOYER_PRIVATE_KEY` into a browser wallet and claim faucets.chain.link drips (0.5 ETH per chain). The faucet only pays a connected wallet and uses a CAPTCHA, which automation must not solve.
 - [x] AI provider: OpenRouter key (Claude models), $3 cap. `ANTHROPIC_API_KEY` is not needed.
-- [ ] Create a CRE account and run `cre login`.
+- [x] CRE account created and `cre login` done (Deploy Access: Not enabled, so workflows run via `cre workflow simulate`).
 - [x] Etherscan V2 key (taken from the logged-in Etherscan dashboard).
 - [x] RPCs: Tenderly gateway (provider 1) plus publicnode (provider 2), keyless and independent.
 - [x] Neon Postgres in Singapore.
