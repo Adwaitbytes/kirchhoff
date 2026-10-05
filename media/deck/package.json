@@ -1,0 +1,15 @@
+{
+  "name": "@kirchhoff/deck",
+  "version": "1.0.0",
+  "description": "Builds KIRCHHOFF.pptx, the stage deck",
+  "scripts": {
+    "build": "node build.cjs"
+  },
+  "type": "commonjs",
+  "dependencies": {
+    "jszip": "^3.10.2",
+    "pptxgenjs": "^3.12.0",
+    "sharp": "^0.35.5"
+  },
+  "private": true
+}
