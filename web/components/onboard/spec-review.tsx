@@ -161,7 +161,7 @@ export function SpecReview({
   const editorRef = useRef<CodeEditor | null>(null);
   const decoRef = useRef<Decorations | null>(null);
   const [mono] = useState(() =>
-    typeof window === "undefined" ? "monospace" : `${getComputedStyle(document.documentElement).getPropertyValue("--font-jetbrains").trim() || "ui-monospace"}, ui-monospace, monospace`,
+    typeof window === "undefined" ? "monospace" : `${getComputedStyle(document.documentElement).getPropertyValue("--font-dm-mono").trim() || "ui-monospace"}, ui-monospace, monospace`,
   );
 
   const counts = useMemo(() => {

@@ -29,12 +29,12 @@ export function LedgerTable({ status, onOpenChain }: { status: TokenStatusRespon
     return (
       <tr key={c.chain} className={cn("group border-b border-wire/70 last:border-0", !c.read.ok && "bg-drift/[0.06]")}>
         <th scope="row" className="py-2 pl-4 pr-3 text-left font-normal">
-          <span className="flex items-baseline gap-2">
+          <span className="flex items-baseline gap-2 whitespace-nowrap">
             <button type="button" onClick={() => onOpenChain(c.chain)} className="flex cursor-pointer items-center gap-1.5 rounded-sm text-sm font-medium text-fg hover:underline">
               {CHAINS[c.chain].name}
               {!c.read.ok ? <TriangleAlert className="size-3.5 text-drift" aria-label="RPC error" /> : null}
             </button>
-            <span className="text-xs text-subtle">{c.role === "home" ? "home" : "remote"} · {c.confidence}</span>
+            <span className="hidden text-xs text-subtle 2xl:inline">{c.role === "home" ? "home" : "remote"} · {c.confidence}</span>
           </span>
         </th>
         <td className="px-3 text-right">
@@ -103,7 +103,7 @@ export function LedgerTable({ status, onOpenChain }: { status: TokenStatusRespon
       <table className="hidden w-full text-sm tnum sm:table">
         <caption className="sr-only">Per-chain ledger for {token.symbol} at the latest epoch</caption>
         <thead>
-          <tr className="border-b border-wire text-xs text-subtle">
+          <tr className="whitespace-nowrap border-b border-wire font-mono text-2xs uppercase tracking-[0.12em] text-subtle">
             <th scope="col" className="py-2 pl-4 pr-3 text-left font-medium">Chain</th>
             <th scope="col" className="px-3 text-right font-medium">Supply</th>
             <th scope="col" className="px-3 text-right font-medium">Escrow</th>

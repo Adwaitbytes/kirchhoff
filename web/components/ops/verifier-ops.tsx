@@ -59,9 +59,9 @@ function NotPublic() {
 
 function Stat({ label, value, unit, hint, testId, tone = "fg", href, source }: { label: string; value: string; unit?: string; hint?: string; testId?: string; tone?: "fg" | "conserved" | "broken"; href: string | null; source: string }) {
   return (
-    <div className="relative overflow-hidden rounded-lg border border-wire bg-inset px-4 py-3.5 shadow-[inset_0_1px_0_0_rgb(255_255_255/0.03)]" data-testid={testId}>
+    <div className="relative overflow-hidden rounded-lg border border-wire bg-panel px-4 py-3.5 shadow-[inset_0_1px_0_0_var(--panel-highlight),0_1px_2px_rgb(0_0_0/0.04)]" data-testid={testId}>
       <p className="text-xs text-muted">{label}</p>
-      <p className={cn("mt-1.5 font-mono text-2xl font-medium leading-none tracking-[-0.03em] tnum", tone === "conserved" ? "text-conserved" : tone === "broken" ? "text-broken" : "text-fg")}>
+      <p className={cn("font-display mt-2 text-2xl leading-none tnum", tone === "conserved" ? "text-conserved" : tone === "broken" ? "text-broken" : "text-fg")}>
         <Fig href={href} label={`${label}, ${source}`}>
           {value}
         </Fig>
@@ -369,7 +369,7 @@ export function VerifierOps() {
             <Cpu className="size-4 text-conserved" aria-hidden="true" />
           </span>
           <div>
-            <h1 className="text-lg font-semibold tracking-[-0.01em]">Verifier Ops</h1>
+            <h1 className="font-display text-xl leading-none">Verifier Ops</h1>
             <p className="text-xs text-muted">The cells that sign, the Judge that decides, the engine that measures</p>
           </div>
         </div>

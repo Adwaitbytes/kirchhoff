@@ -30,7 +30,7 @@ function highlight(code: string, lang: Lang): ReactNode[] {
     if (tok.startsWith("//") || (lang === "bash" && tok.startsWith("#"))) cls = "text-subtle italic";
     else if (tok.startsWith("#")) cls = null;
     else if (tok.startsWith('"') || tok.startsWith("'")) cls = lang === "json" && code[at + tok.length] === ":" ? "text-recovering" : "text-conserved";
-    else if (/^\d/.test(tok)) cls = "text-drift";
+    else if (/^\d/.test(tok)) cls = "text-drift-text";
     else if (kw.includes(tok)) cls = "text-quarantined";
     else if (/^[A-Z]/.test(tok) && lang !== "json") cls = "text-fg font-medium";
     out.push(cls ? (

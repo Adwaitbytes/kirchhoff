@@ -273,7 +273,7 @@ export function Integrations() {
         <div aria-hidden="true" className="pointer-events-none absolute -top-24 right-[-10%] h-64 w-[520px] rounded-full opacity-60 blur-3xl" style={{ background: "radial-gradient(closest-side, color-mix(in oklab, var(--status-conserved) 22%, transparent), transparent)" }} />
         <div aria-hidden="true" className="schematic-grid pointer-events-none absolute inset-0 [mask-image:linear-gradient(to_bottom,black,transparent)]" />
         <div className="relative">
-          <h1 className="text-xl font-semibold tracking-[-0.02em]">Tap the current</h1>
+          <h1 className="font-display text-xl leading-none">Tap the current</h1>
           <p className="mt-2 max-w-[60ch] text-sm leading-relaxed text-muted">
             Three taps on one truth. The onchain feed is the source; HTTP and MCP mirror it. Every response names the ledger and block it read.
           </p>

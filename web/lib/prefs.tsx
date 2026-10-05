@@ -24,7 +24,10 @@ export const PREFS_BOOT_SCRIPT = `(() => {
     var t = q.get("theme");
     if (t === "light" || t === "dark") localStorage.setItem("${THEME_KEY}", t);
     var stored = localStorage.getItem("${THEME_KEY}");
-    d.setAttribute("data-theme", stored === "light" ? "light" : "dark");
+    // Marketing pages default to light like the brand; the app is dark-first (control room).
+    var marketing = location.pathname === "/" || location.pathname.indexOf("/t/") === 0;
+    var theme = stored === "light" || stored === "dark" ? stored : marketing ? "light" : "dark";
+    d.setAttribute("data-theme", theme);
   } catch (e) {
     document.documentElement.setAttribute("data-theme", "dark");
   }

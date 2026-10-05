@@ -33,6 +33,7 @@
   --shadow-panel: 0 1px 0 0 rgb(255 255 255 / 0.03) inset, 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px -12px rgb(0 0 0 / 0.6);
   --shadow-pop: 0 1px 0 0 rgb(255 255 255 / 0.05) inset, 0 12px 32px -8px rgb(0 0 0 / 0.7), 0 2px 6px rgb(0 0 0 / 0.5);
   --grid-dot: rgb(154 163 175 / 0.13);
+  --mint: #7fdcae;
   --panel-top: #161a20;
   --panel-highlight: rgb(255 255 255 / 0.05);
   --ambient-a: rgb(45 212 191 / 0.07);
@@ -48,33 +49,35 @@
 }
 
 [data-theme="light"] {
-  --bg-base: #fafaf9;
+  /* Reference palette: warm off-whites, near-black ink, hairlines, mint accents. */
+  --bg-base: #f4f4f1;
   --bg-panel: #ffffff;
-  --bg-raised: #f4f4f3;
-  --bg-inset: #f5f5f4;
-  --line-wire: #d6d9de;
-  --line-strong: #b8bdc5;
-  --fg: #0b0d10;
-  --fg-muted: #4b5563;
-  --fg-subtle: #5f6773;
+  --bg-raised: #fafaf9;
+  --bg-inset: #f0f0ee;
+  --line-wire: #e3e3df;
+  --line-strong: #cbcbc5;
+  --fg: #1a1a1a;
+  --fg-muted: #57574f;
+  --fg-subtle: #6b6b64;
   --status-conserved: #0f766e;
   --status-drift: #b45309;
   --status-broken: #be123c;
   --status-quarantined: #6d28d9;
   --status-recovering: #1d4ed8;
   --status-unknown: #6b7280;
-  --status-unknown-text: #6b7280;
+  --status-unknown-text: #5b616c;
   --status-drift-text: #92400e;
   --on-status: #ffffff;
   --focus-ring: #0369a1;
-  --shadow-panel: 0 1px 2px rgb(16 24 40 / 0.04), 0 4px 16px -8px rgb(16 24 40 / 0.08);
-  --shadow-pop: 0 2px 4px rgb(16 24 40 / 0.06), 0 16px 40px -12px rgb(16 24 40 / 0.18);
-  --grid-dot: rgb(75 85 99 / 0.16);
+  --shadow-panel: 0 0 0 1px rgb(26 26 26 / 0.04), 0 1px 2px rgb(26 26 26 / 0.04), 0 8px 24px -12px rgb(17 132 83 / 0.12);
+  --shadow-pop: 0 0 0 1px rgb(26 26 26 / 0.05), 0 2px 4px rgb(26 26 26 / 0.04), 0 24px 48px -20px rgb(17 132 83 / 0.22);
+  --grid-dot: rgb(38 38 35 / 0.14);
   --panel-top: #ffffff;
   --panel-highlight: rgb(255 255 255 / 1);
-  --ambient-a: rgb(15 118 110 / 0.06);
-  --ambient-b: rgb(29 78 216 / 0.04);
-  --grain-opacity: 0.035;
+  --ambient-a: rgb(127 220 174 / 0.16);
+  --ambient-b: rgb(26 125 166 / 0.06);
+  --grain-opacity: 0.03;
+  --mint: #7fdcae;
   color-scheme: light;
 }
 
@@ -113,9 +116,12 @@
   --color-drift-text: var(--status-drift-text);
   --color-on-status: var(--on-status);
   --color-focus: var(--focus-ring);
+  --color-mint: var(--mint);
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-jetbrains), ui-monospace, "SFMono-Regular", monospace;
+  --font-mono: var(--font-dm-mono), ui-monospace, "SFMono-Regular", monospace;
+  /* Display only: hero and section titles, the Δ readout, big KPIs, page titles. */
+  --font-display: var(--font-geist-pixel), var(--font-dm-mono), ui-monospace, monospace;
 
   --text-2xs: calc(11px * var(--type-scale));
   --text-2xs--line-height: 1.35;
@@ -136,8 +142,8 @@
 
   --radius-sm: 4px;
   --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
+  --radius-lg: 10px;
+  --radius-xl: 18px;
 
   --shadow-panel: var(--shadow-panel);
   --shadow-pop: var(--shadow-pop);
@@ -170,8 +176,35 @@
     color: var(--fg);
     font-family: var(--font-sans);
     font-size: var(--text-sm);
+    font-weight: 450;
     line-height: 1.5;
+    letter-spacing: -0.011em;
     font-feature-settings: "cv11", "ss01", "ss03";
+    font-optical-sizing: auto;
+  }
+
+  /* Only real faces: never let the browser fake a bold or an italic. */
+  html {
+    font-synthesis: none;
+  }
+
+  h1,
+  h2,
+  h3 {
+    line-height: 1.15;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font-weight: 500;
+  }
+
+  :where(.font-mono) {
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
   }
 
   /* Grid items never force their track wider than the viewport. */
@@ -213,13 +246,36 @@
 
   .tnum {
     font-variant-numeric: tabular-nums;
-    font-feature-settings: "tnum", "zero";
+    font-feature-settings: "tnum";
+  }
+
+  /* Geist Pixel: display only. Its pixel grid wants tight but not crushed tracking. */
+  .font-display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    letter-spacing: -0.01em;
+    font-feature-settings: normal;
+  }
+
+  /* DM Mono eyebrow: small, uppercase, widely tracked. */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: calc(11.5px * var(--type-scale));
+    font-weight: 400;
+    line-height: 1.4;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+
+  /* Inter heading tracking: tighter as it grows. */
+  .tracking-heading {
+    letter-spacing: -0.02em;
   }
 
   .panel {
     background: linear-gradient(180deg, var(--panel-top) 0%, var(--bg-panel) 140px);
     border: 1px solid var(--line-wire);
-    border-radius: 8px;
+    border-radius: 12px;
     box-shadow: inset 0 1px 0 0 var(--panel-highlight), var(--shadow-panel);
   }
 

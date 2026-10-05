@@ -90,7 +90,7 @@ export function DeltaHistory({ epochs, decimals, symbol, view }: { epochs: Epoch
           <AreaChart
             accessibilityLayer={false}
             data={data}
-            margin={{ top: 8, right: 16, bottom: 0, left: 4 }}
+            margin={{ top: 8, right: 28, bottom: 0, left: 4 }}
             onMouseMove={(s) => {
               const i = typeof s.activeTooltipIndex === "number" ? s.activeTooltipIndex : Number(s.activeTooltipIndex);
               setHover(Number.isFinite(i) ? (data[i] ?? null) : null);
@@ -116,7 +116,7 @@ export function DeltaHistory({ epochs, decimals, symbol, view }: { epochs: Epoch
               scale="time"
               domain={["dataMin", "dataMax"]}
               tickFormatter={(t: number) => formatTime(new Date(t).toISOString()).slice(0, 5)}
-              tick={{ fill: "var(--fg-subtle)", fontSize: tickSize, fontFamily: "var(--font-jetbrains)" }}
+              tick={{ fill: "var(--fg-subtle)", fontSize: tickSize, fontFamily: "var(--font-dm-mono)" }}
               tickLine={false}
               axisLine={{ stroke: "var(--line-wire)" }}
               minTickGap={48}
@@ -130,7 +130,7 @@ export function DeltaHistory({ epochs, decimals, symbol, view }: { epochs: Epoch
                 const r = Math.round(v);
                 return r === 0 ? "0" : new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(r);
               }}
-              tick={{ fill: "var(--fg-subtle)", fontSize: tickSize, fontFamily: "var(--font-jetbrains)" }}
+              tick={{ fill: "var(--fg-subtle)", fontSize: tickSize, fontFamily: "var(--font-dm-mono)" }}
               tickLine={false}
               axisLine={false}
               width={48}

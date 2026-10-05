@@ -215,7 +215,7 @@ export function OnboardWizard() {
             <p className="flex items-center gap-1.5 text-xs font-medium text-conserved">
               <Sparkles className="size-3.5" aria-hidden="true" /> Spec Copilot
             </p>
-            <h1 className="mt-1.5 text-xl font-semibold tracking-[-0.02em] text-fg">Wire a token into the circuit</h1>
+            <h1 className="font-display mt-2 text-xl leading-[1.1] text-fg">Wire a token into the circuit</h1>
             <p className="mt-1 text-sm text-muted">Six steps. One Safe signature. AI drafts, you decide.</p>
           </div>
         </header>

@@ -118,7 +118,7 @@ function withAlpha(hex: string, a: number): string {
   return `rgba(${r},${g},${b},${a.toFixed(3)})`;
 }
 
-export function CurrentField({ variant = "hero", className }: { variant?: "hero" | "ambient"; className?: string }) {
+export function CurrentField({ variant = "hero", className, focus = 0.62 }: { variant?: "hero" | "ambient" | "glow"; className?: string; focus?: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const { reducedMotion, theme, motionScale } = usePrefs();
 
@@ -140,11 +140,11 @@ export function CurrentField({ variant = "hero", className }: { variant?: "hero"
     const pointer = { x: -9999, y: -9999, heat: 0 };
     const colors = {
       dot: cssColor("--fg-subtle", "#7d8693"),
-      teal: cssColor("--status-conserved", "#2dd4bf"),
+      teal: variant === "glow" ? cssColor("--mint", "#7fdcae") : cssColor("--status-conserved", "#2dd4bf"),
       red: cssColor("--status-broken", "#f43f5e"),
     };
     const light = theme === "light";
-    const monoFamily = getComputedStyle(document.documentElement).getPropertyValue("--font-jetbrains").trim() || "ui-monospace, monospace";
+    const monoFamily = getComputedStyle(document.documentElement).getPropertyValue("--font-dm-mono").trim() || "ui-monospace, monospace";
 
     const layout = () => {
       const rect = canvas.getBoundingClientRect();
@@ -159,11 +159,11 @@ export function CurrentField({ variant = "hero", className }: { variant?: "hero"
       const snap = (v: number) => gap / 2 + Math.round((v - gap / 2) / gap) * gap;
       const built = buildTraces(w, h, portrait, snap);
       traces = variant === "hero" ? built.traces : [];
-      junction = variant === "hero" ? built.j : { x: w * 0.5, y: h * 0.5 };
+      junction = variant === "hero" ? built.j : { x: w * 0.5, y: h * (variant === "glow" ? focus : 0.5) };
       const cx = w * 0.5;
-      const cy = variant === "hero" ? h * 0.6 : h * 0.5;
-      const rx = w * (variant === "hero" ? 0.7 : 0.55);
-      const ry = h * (variant === "hero" ? 0.75 : 0.62);
+      const cy = variant === "hero" ? h * 0.6 : variant === "glow" ? h * focus : h * 0.5;
+      const rx = w * (variant === "hero" ? 0.7 : variant === "glow" ? 0.8 : 0.55);
+      const ry = h * (variant === "hero" ? 0.75 : variant === "glow" ? 0.9 : 0.62);
       dots = [];
       for (let y = gap / 2; y < h; y += gap) {
         for (let x = gap / 2; x < w; x += gap) {
@@ -226,6 +226,11 @@ export function CurrentField({ variant = "hero", className }: { variant?: "hero"
             const fr = (1 - flare) * 260;
             red += Math.exp(-((d.dj / 70) ** 2)) * flare * 1.1 + Math.exp(-(((d.dj - fr) / 16) ** 2)) * flare * 0.8;
           }
+        }
+        if (variant === "glow") {
+          // A mint bloom on the dot field around the focal object, breathing slowly.
+          const g = Math.exp(-((d.dj / (w < 700 ? 150 : 260)) ** 2)) * (0.62 + 0.12 * Math.sin(t * 0.9));
+          teal += g;
         }
         if (pointer.heat > 0) {
           const dp = Math.hypot(d.x - pointer.x, d.y - pointer.y);
@@ -367,7 +372,7 @@ export function CurrentField({ variant = "hero", className }: { variant?: "hero"
       document.removeEventListener("visibilitychange", onVis);
       host?.removeEventListener("pointermove", onMove);
     };
-  }, [variant, reducedMotion, theme, motionScale]);
+  }, [variant, reducedMotion, theme, motionScale, focus]);
 
   return <canvas ref={ref} aria-hidden="true" className={className} />;
 }

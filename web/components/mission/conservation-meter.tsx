@@ -8,6 +8,7 @@ import { escrowBalanceUrl, readContractUrl } from "@/lib/explorer";
 import { useDuration } from "@/lib/prefs";
 import { Verifiable } from "@/components/kh/links";
 import { cn } from "@/lib/utils";
+import { DeltaGlyph } from "@/components/kh/delta-glyph";
 import { hasEpoch } from "@/lib/status";
 
 const COUNT_MS = 800;
@@ -50,14 +51,14 @@ export function DeltaReadout({ delta, decimals, symbol, href, size = "hero" }: {
   return (
     <div className="flex items-baseline gap-3">
       <span className={cn("font-mono font-light text-subtle", size === "hero" ? "text-2xl" : "text-xl")} aria-hidden="true">
-        Δ
+        <DeltaGlyph />
       </span>
       <Verifiable href={href} label={`Δ ${shown} ${symbol}, read ConservationLedger.statusOf onchain`} className="min-w-0">
         <span
           data-testid="delta-readout"
           style={{ minWidth: `${reserve}ch`, display: "inline-block" }}
           className={cn(
-            "font-mono font-medium tracking-[-0.03em] tnum transition-colors duration-300",
+            "font-display tnum transition-colors duration-300",
             size === "hero" ? "text-3xl" : "text-2xl",
             negative ? "text-broken" : "text-fg",
           )}

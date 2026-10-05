@@ -115,7 +115,7 @@ function Header({ r, decimals }: { r: IncidentResponse; decimals: number }) {
           <span className="inline-flex h-6 items-center rounded-md border border-wire bg-inset px-2 text-xs text-muted">Incident {i.status}</span>
           <span className="font-mono text-xs text-subtle">{i.reason}</span>
         </div>
-        <h1 id="incident-title" className="mt-3 text-xl font-semibold tracking-[-0.02em] text-fg">
+        <h1 id="incident-title" className="font-display mt-3 text-xl leading-[1.1] text-fg">
           {i.token} · {incidentHeadline(i.reason)}
         </h1>
         {loop ? (
@@ -139,18 +139,18 @@ function Header({ r, decimals }: { r: IncidentResponse; decimals: number }) {
         )}
         <div className="mt-5 grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
           <Stat label="Δ after" hint={`Before ${formatAmount(parseWei(i.deltaBefore), { decimals, signed: true, maxFraction: 0 })}`}>
-            <Verifiable href={ledgerRead} label="Δ after, read ConservationLedger onchain" className={cn("font-mono text-2xl font-medium tracking-[-0.03em]", delta < 0n ? "text-broken" : "text-fg")}>
+            <Verifiable href={ledgerRead} label="Δ after, read ConservationLedger onchain" className={cn("font-display text-2xl leading-none", delta < 0n ? "text-broken" : "text-fg")}>
               {formatAmount(delta, { decimals, signed: true, maxFraction: 0 })}
             </Verifiable>
             <span className="ml-1.5 text-xs text-muted">{i.token}</span>
           </Stat>
           <Stat label={loop ? "Detection to BROKEN" : "Offending block to BROKEN"} hint={`${formatDateTime(i.offendingBlockAt)}`}>
             {firstBreach?.tx ? (
-              <Verifiable href={txRefUrl(firstBreach.tx)} label="First BREACH report transaction" className="font-mono text-xl font-medium text-fg">
+              <Verifiable href={txRefUrl(firstBreach.tx)} label="First BREACH report transaction" className="font-display text-xl text-fg">
                 {formatSeconds(i.timeToBrokenSeconds)}
               </Verifiable>
             ) : (
-              <span className="font-mono text-xl font-medium text-fg tnum">{formatSeconds(i.timeToBrokenSeconds)}</span>
+              <span className="font-display text-xl text-fg tnum">{formatSeconds(i.timeToBrokenSeconds)}</span>
             )}
           </Stat>
           <Stat label={loop ? "Home BREACH report" : "Offending credit"} hint={`Recipient ${orNa(i.offending.recipient, (a) => shortHash(a))}`}>

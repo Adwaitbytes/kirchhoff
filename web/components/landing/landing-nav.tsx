@@ -39,8 +39,8 @@ export function LandingNav() {
         <nav
           aria-label="Site"
           className={cn(
-            "surface-glass mx-auto flex h-14 max-w-[1160px] items-center gap-4 rounded-2xl border px-3 pl-3.5 transition-[border-color,box-shadow,background-color] duration-300 sm:gap-6 sm:pl-4",
-            scrolled ? "border-wire shadow-pop" : "border-transparent shadow-none",
+            "mx-auto flex h-14 max-w-[1160px] items-center gap-4 rounded-2xl border bg-panel/70 px-3 pl-3.5 backdrop-blur-xl transition-[border-color,box-shadow,background-color] duration-300 sm:gap-6 sm:pl-4",
+            scrolled ? "border-wire shadow-panel" : "border-transparent bg-transparent shadow-none backdrop-blur-0",
           )}
         >
           <Link href="/" className="flex items-center gap-2.5 rounded-lg" aria-label="KIRCHHOFF home">

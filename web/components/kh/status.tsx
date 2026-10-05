@@ -8,7 +8,7 @@ export function StatusWord({ status, className, iconClassName }: { status: Token
   const s = STATUS_STYLE[status];
   const Icon = s.icon;
   return (
-    <span className={cn("inline-flex items-center gap-1.5 font-semibold tracking-[0.02em]", s.text, className)}>
+    <span className={cn("inline-flex items-center gap-1.5 font-mono font-medium tracking-[0.06em]", s.text, className)}>
       <Icon className={cn("size-[1.05em] shrink-0", iconClassName)} strokeWidth={2.25} aria-hidden="true" />
       {status}
     </span>

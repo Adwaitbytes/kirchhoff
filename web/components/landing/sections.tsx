@@ -182,7 +182,7 @@ function Box({ x, y, w, h, title, sub, accent = false }: { x: number; y: number;
         {title}
       </text>
       {sub ? (
-        <text x={x + 14} y={y + 43} fill="var(--fg-muted)" fontSize={11.5} fontFamily="var(--font-jetbrains)">
+        <text x={x + 14} y={y + 43} fill="var(--fg-muted)" fontSize={11.5} fontFamily="var(--font-dm-mono)">
           {sub}
         </text>
       ) : null}
@@ -193,7 +193,7 @@ function Box({ x, y, w, h, title, sub, accent = false }: { x: number; y: number;
 function Tag({ x, y, children, tone = "muted" }: { x: number; y: number; children: string; tone?: "muted" | "broken" | "conserved" }) {
   const fill = tone === "broken" ? "var(--status-broken)" : tone === "conserved" ? "var(--status-conserved)" : "var(--fg-subtle)";
   return (
-    <text x={x} y={y} fill={fill} fontSize={11} fontFamily="var(--font-jetbrains)" textAnchor="middle">
+    <text x={x} y={y} fill={fill} fontSize={11} fontFamily="var(--font-dm-mono)" textAnchor="middle">
       {children}
     </text>
   );
@@ -219,7 +219,7 @@ export function ArchitectureDiagram() {
           ))}
           <Tag x={292} y={30}>DON consensus reads</Tag>
           <Box x={340} y={120} w={250} h={112} title="CRE Conservation Engine" sub="W1 Junction · W2 Loop" accent />
-          <text x={354} y={208} fill="var(--fg-muted)" fontSize={11.5} fontFamily="var(--font-jetbrains)">
+          <text x={354} y={208} fill="var(--fg-muted)" fontSize={11.5} fontFamily="var(--font-dm-mono)">
             W3 Responder · W4 Topology
           </text>
           <Wire d="M465 232 V300" speed={1.1} />
@@ -238,7 +238,7 @@ export function ArchitectureDiagram() {
           <Tag x={1010} y={378} tone="broken">FAIL TOKEN_BROKEN</Tag>
           <Tag x={1010} y={394} tone="broken">never executes</Tag>
           <Box x={340} y={400} w={520} h={50} title="DemoLendingMarket · KirchhoffGuard" sub="" />
-          <text x={354} y={442} fill="var(--fg-muted)" fontSize={11.5} fontFamily="var(--font-jetbrains)">
+          <text x={354} y={442} fill="var(--fg-muted)" fontSize={11.5} fontFamily="var(--font-dm-mono)">
             read the feed · borrow() reverts CollateralBroken()
           </text>
           <Wire d="M465 364 V400" speed={1.6} tone="muted" />

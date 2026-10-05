@@ -109,7 +109,7 @@ function BigBadge({ status }: { status: TokenStatus }) {
         )}
         <Icon className={cn("relative size-5 sm:size-6", s.text)} strokeWidth={2.25} aria-hidden="true" />
       </span>
-      <span className={cn("font-mono text-xl font-semibold tracking-[0.06em] sm:text-2xl", s.text)}>{status}</span>
+      <span className={cn("font-display text-xl tracking-[0.04em] sm:text-2xl", s.text)}>{status}</span>
     </div>
   );
 }
@@ -268,7 +268,7 @@ function Hero({ status }: { status: TokenStatusResponse }) {
   return (
     <section className="flex flex-col items-center gap-7 pb-4 pt-10 text-center sm:pt-16" aria-labelledby="status-hero-title">
       <BigBadge status={shown} />
-      <h1 id="status-hero-title" data-testid="status-hero" className="max-w-[22ch] text-balance text-xl font-semibold leading-[1.15] tracking-[-0.025em] sm:text-2xl" aria-live="polite">
+      <h1 id="status-hero-title" data-testid="status-hero" className="max-w-[26ch] text-balance text-xl font-medium leading-[1.2] tracking-[-0.02em] sm:text-[28px]" aria-live="polite">
         {heroCopy(status, age)}
       </h1>
       <div className="flex max-w-full justify-center overflow-hidden">

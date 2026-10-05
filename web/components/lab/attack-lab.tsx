@@ -199,7 +199,7 @@ export function AttackLab() {
       <aside className="flex w-full shrink-0 flex-col gap-4 border-b border-wire bg-panel p-4 sm:p-5 lg:w-[460px] lg:overflow-y-auto lg:border-b-0 lg:border-r 2xl:w-[520px]" aria-labelledby="lab-title">
         <div className="space-y-3">
           <div className="flex items-center gap-2">
-            <h1 id="lab-title" className="text-lg font-semibold tracking-[-0.01em]">
+            <h1 id="lab-title" className="font-display text-xl leading-none">
               Attack Lab
             </h1>
             <SimulationLabel />

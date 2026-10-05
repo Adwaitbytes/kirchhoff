@@ -56,7 +56,7 @@ function Row({ v, decimals, symbol, fresh }: { v: Verdict; decimals: number; sym
           </p>
         )}
         <p className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted">
-          <a href={txRefUrl(v.sourceTx)} target="_blank" rel="noopener noreferrer" className="font-mono text-fg/90 tnum hover:underline" title="Source debit transaction">
+          <a href={txRefUrl(v.sourceTx)} target="_blank" rel="noopener noreferrer" className="shrink-0 whitespace-nowrap font-mono text-fg/90 tnum hover:underline" title="Source debit transaction">
             {formatAmount(parseWei(v.amount), { decimals })} {symbol}
           </a>
           <span className="text-subtle">·</span>

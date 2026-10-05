@@ -97,7 +97,7 @@ function Pins({ side, count }: { side: "top" | "bottom" | "left" | "right"; coun
       )}
     >
       {Array.from({ length: count ?? (horizontal ? 7 : 4) }, (_, i) => (
-        <span key={i} className={cn("rounded-[1px] bg-line-strong", horizontal ? "h-[5px] w-[3px]" : "h-[3px] w-[5px]")} />
+        <span key={i} className={cn("rounded-[1px] bg-line-strong opacity-60", horizontal ? "h-[5px] w-[3px]" : "h-[3px] w-[5px]")} />
       ))}
     </div>
   );
