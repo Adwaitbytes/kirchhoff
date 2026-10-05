@@ -53,7 +53,7 @@ export async function bootstrap(db: Db, cfg: IndexerConfig, tokenName: string): 
       return d !== undefined && d.ledger.toLowerCase() !== r.ledger.toLowerCase();
     });
     if (moved) {
-      for (const table of ["debits", "credits", "matches", "epochs", "status_changes", "breaches", "incidents", "incident_actions", "taints", "chain_state", "cursors", "block_hashes", "verdicts", "judge_verdicts", "stream_events", "lab_runs", "notifications"]) {
+      for (const table of ["debits", "credits", "matches", "epochs", "status_changes", "breaches", "incidents", "incident_actions", "taints", "chain_state", "cursors", "block_hashes", "verdicts", "judge_verdicts", "stream_events", "lab_runs", "notifications", "deployment_docs"]) {
         await client.query(`delete from ${table}`);
       }
       await client.query("delete from specs where source = 'registry'");
@@ -95,6 +95,12 @@ export async function bootstrap(db: Db, cfg: IndexerConfig, tokenName: string): 
           d.issuerSafe ?? home?.issuerSafe ?? null,
           d.deployedAtBlock?.toString() ?? null,
         ],
+      );
+    }
+    if (cfg.mergedDeployments) {
+      await client.query(
+        "insert into deployment_docs (name, doc, updated_at) values ($1, $2, now()) on conflict (name) do update set doc = excluded.doc, updated_at = now()",
+        ["active", JSON.stringify(cfg.mergedDeployments.doc)],
       );
     }
     await client.query(

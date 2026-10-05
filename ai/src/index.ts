@@ -10,4 +10,4 @@ export { DRAFT_SCHEMA, addressProvenanceCoverage, provenanceChecker, renderDraft
 export { BlockscoutExplorer, CompositeExplorer, EtherscanExplorer, LocalArtifactExplorer, type ContractMeta, type Explorer } from "./copilot/explorer.ts";
 export { SpecInvalidError, backtestYaml, validateYaml, type BacktestBody, type BacktestDeps } from "./backtest.ts";
 export { ASK_VIEWS, askKirchhoff, checkSelect, type AskBackend, type AskOptions, type SqlResult } from "./ask.ts";
-export { BlockscoutSearch, LocalScan, runTopologyScout, type CandidateSource, type ScoutCandidate, type ScoutProposal } from "./scout.ts";
+export { BlockscoutSearch, LocalScan, runTopologyScout, toFinding, type CandidateSource, type ScoutCandidate, type ScoutProposal, type ScoutTraceEvent } from "./scout.ts";

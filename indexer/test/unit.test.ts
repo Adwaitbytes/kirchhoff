@@ -58,25 +58,63 @@ describe("Judge verdict sink", () => {
 });
 
 describe("Notifier", () => {
-  it("pages once per incident per channel, retries failures, and skips when unconfigured", async () => {
-    const sent: string[] = [];
-    let fail = true;
-    const channels = [
-      { name: "slack" as const, send: (t: string) => { sent.push(t); return Promise.resolve(); } },
-      { name: "telegram" as const, send: () => (fail ? Promise.reject(new Error("telegram HTTP 500")) : Promise.resolve()) },
-    ];
+  const notice = {
+    incidentId: "0xinc",
+    token: "kETH",
+    reason: "DEBIT_NOT_FOUND",
+    deficit: "-116500000000000000000000",
+    decimals: 18,
+    offendingLabel: "WeakBridge credit on Ethereum Sepolia",
+    offendingTxUrl: "https://sepolia.etherscan.io/tx/0xabc",
+    contained: ["CCIP lanes frozen on Ethereum Sepolia, Base Sepolia", "0xatt tainted on Ethereum Sepolia"],
+    link: "https://kirchhoff.test/incidents/0xinc",
+    summary: "WeakBridge credited 116,500 kETH with no matching debit.",
+    summaryLabel: "AI summary. Verify against evidence.",
+    simulation: true,
+  };
+
+  it("every page carries deficit, offending tx link, containment, Incident Room link and narrative", () => {
+    const t = incidentText(notice);
+    for (const part of ["Deficit: -116,500 kETH", notice.offendingTxUrl, "Already contained: CCIP lanes frozen", notice.link, "AI summary. Verify against evidence.", notice.summary, "Testnet simulation."]) {
+      expect(t).toContain(part);
+    }
+    expect(t).not.toMatch(/[\u2014\u2013]/);
+  });
+
+  it("posts to mocked Telegram, Slack and PagerDuty Events v2 endpoints, once per incident per channel", async () => {
+    const calls: { url: string; body: Record<string, unknown> }[] = [];
+    let pdStatus = 500;
+    const fetchMock = ((url: string | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), body: JSON.parse(init?.body as string) as Record<string, unknown> });
+      const status = String(url).includes("pagerduty") ? pdStatus : 200;
+      return Promise.resolve(new Response("{}", { status }));
+    }) as typeof fetch;
+    const channels = channelsFromEnv({ TELEGRAM_BOT_TOKEN: "tg-secret", TELEGRAM_CHAT_ID: "42", SLACK_WEBHOOK_URL: "https://hooks.slack.test/T/B/secret", PAGERDUTY_ROUTING_KEY: "pd-routing-key" }, fetchMock);
+    expect(channels.map((c) => c.name)).toEqual(["telegram", "slack", "pagerduty"]);
     const n = new Notifier(db, channels);
-    const notice = { incidentId: "0xinc", token: "kETH", reason: "DEBIT_NOT_FOUND", amount: "116500000000000000000000", decimals: 18, chain: "ethereum-testnet-sepolia", recipient: "0xabc", link: "https://k/incidents/0xinc" };
-    expect(await n.notify(notice)).toEqual(["slack"]);
+    expect(await n.pending()).toEqual([]);
+    expect(await n.notify(notice)).toEqual(["telegram", "slack"]);
+    const pd = calls.find((c) => c.url === "https://events.pagerduty.com/v2/enqueue");
+    expect(pd?.body).toMatchObject({ routing_key: "pd-routing-key", event_action: "trigger", dedup_key: "0xinc", payload: { severity: "critical", source: "kirchhoff" } });
+    const details = (pd?.body.payload as { custom_details: Record<string, unknown> }).custom_details;
+    expect(details).toMatchObject({ deficit: "-116,500 kETH", offending_tx: notice.offendingTxUrl, already_contained: notice.contained, narrative: notice.summary });
+    expect(calls.find((c) => c.url.includes("telegram"))?.body).toMatchObject({ chat_id: "42" });
+    expect(String(calls.find((c) => c.url.includes("slack"))?.body.text)).toContain("Incident Room: https://kirchhoff.test/incidents/0xinc");
     expect(await n.notify(notice)).toEqual([]);
-    fail = false;
-    expect(await n.notify(notice)).toEqual(["telegram"]);
+    pdStatus = 202;
+    expect(await n.notify(notice)).toEqual(["pagerduty"]);
     expect(await n.notify(notice)).toEqual([]);
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toContain("116,500 kETH on Ethereum Sepolia");
-    expect(incidentText(notice)).not.toMatch(/[—–]/);
-    expect(new Notifier(db, channelsFromEnv({})).configured).toBe(false);
-    expect(await new Notifier(db, []).notifyIncident("0xinc", null)).toEqual([]);
+    const failed = await db.query<{ last_error: string | null }>("select last_error from notifications where channel = 'pagerduty'");
+    expect(failed.rows[0]?.last_error).toBeNull();
+  });
+
+  it("skips unconfigured channels and keeps secrets out of stored errors", async () => {
+    expect(channelsFromEnv({})).toEqual([]);
+    expect(new Notifier(db, []).configured).toBe(false);
+    const bad = channelsFromEnv({ SLACK_WEBHOOK_URL: "https://hooks.slack.test/T/B/very-secret" }, (() => Promise.resolve(new Response("", { status: 403 }))));
+    await new Notifier(db, bad).notify({ ...notice, incidentId: "0xother" });
+    const row = await db.query<{ last_error: string }>("select last_error from notifications where incident_id = '0xother'");
+    expect(row.rows[0]?.last_error).toBe("slack HTTP 403");
   });
 });
 

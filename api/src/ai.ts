@@ -2,6 +2,9 @@ import type { PublicClient } from "viem";
 import { createChainClient, type Db, type Queryable } from "@kirchhoff/indexer";
 import {
   BlockscoutExplorer,
+  BlockscoutSearch,
+  LocalScan,
+  type CandidateSource,
   CachedProvider,
   CompositeExplorer,
   EtherscanExplorer,
@@ -61,6 +64,11 @@ export class AiServices {
     const list: Explorer[] = [new BlockscoutExplorer()];
     if (this.deps.etherscanKey) list.push(new EtherscanExplorer(this.deps.etherscanKey));
     return new CompositeExplorer(list);
+  }
+
+  /** Topology Scout sources: Blockscout search on testnets, a creation scan on Anvil. */
+  scoutSources(): CandidateSource[] {
+    return this.deps.mode === "local" ? [new LocalScan(this.clients())] : [new BlockscoutSearch()];
   }
 
   copilotEnv(): CopilotEnv {

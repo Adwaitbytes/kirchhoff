@@ -80,6 +80,8 @@ const adminAbi = parseAbi([
   "function credit(bytes32 id, address to, uint256 amount, uint64 srcChain, bytes signature)",
   "function nonce() view returns (uint256)",
   "function registerToken(string symbol, address issuerSafe) returns (bytes32)",
+  "function proposeSpec(bytes32 tokenId, bytes32 specHash, string specURI)",
+  "function activateSpec(bytes32 tokenId)",
 ]);
 
 export type WorldChain = {
@@ -149,7 +151,7 @@ export class World {
     await new Promise((r) => setTimeout(r, 100));
   }
 
-  private async deployContract(c: WorldChain, name: string, args: readonly unknown[]): Promise<Address> {
+  async deployContract(c: WorldChain, name: string, args: readonly unknown[]): Promise<Address> {
     const a = artifact(name);
     const hash = await c.wallet("owner").deployContract({ abi: a.abi, bytecode: a.bytecode.object, args, account: ACCOUNTS.owner, chain: null });
     const receipt = await c.pub.waitForTransactionReceipt({ hash });

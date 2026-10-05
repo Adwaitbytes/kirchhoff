@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { aiConfigFromEnv } from "@kirchhoff/ai";
 import { REPO_ROOT, createDb, networkMode, rpcUrls, type Db } from "@kirchhoff/indexer";
 import { CHAIN_KEYS, type Address, type OpsResponse } from "@kirchhoff/sdk";
+import { Notifier, channelsFromEnv } from "@kirchhoff/indexer/notifier";
 import { AiServices } from "./ai.ts";
 import type { AppDeps } from "./app.ts";
 import { LabRunner } from "./lab.ts";
@@ -76,7 +77,7 @@ export function depsFromEnv(env: NodeJS.ProcessEnv, runtime: Runtime, db?: Db): 
       },
       database,
     ),
-    ops: new Ops(database, { rpc, chains: [...CHAIN_KEYS], cells: cells(env), enforcement, metrics: metricsUrls(env) }),
+    ops: new Ops(database, { rpc, chains: [...CHAIN_KEYS], cells: cells(env), enforcement, metrics: metricsUrls(env), publicBaseUrl: env.API_PUBLIC_URL ?? "", token: env.KIRCHHOFF_TOKEN ?? "kETH" }),
     clients: chainClients(rpc, mode),
     issuerKey: env.ISSUER_API_KEY,
     internalKey: env.INTERNAL_INGEST_KEY ?? env.JUDGE_HMAC_SECRET,
@@ -84,6 +85,9 @@ export function depsFromEnv(env: NodeJS.ProcessEnv, runtime: Runtime, db?: Db): 
     websocket: runtime === "server",
     sseMaxMs: Number(env.SSE_MAX_MS ?? (runtime === "serverless" ? 25_000 : 300_000)),
     corsOrigins: env.CORS_ORIGINS ? env.CORS_ORIGINS.split(",").map((s) => s.trim()) : true,
+    notifier: new Notifier(database, channelsFromEnv(env)),
+    webPublicUrl: env.WEB_PUBLIC_URL ?? null,
+    aggregatorUrl: env.CCV_AGGREGATOR_URL ?? null,
   };
 }
 

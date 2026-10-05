@@ -4,7 +4,7 @@ import rateLimit from "@fastify/rate-limit";
 import websocket from "@fastify/websocket";
 import type { Db } from "@kirchhoff/indexer";
 import { ingestVerdict, parseVerdictReport, VerdictValidationError } from "@kirchhoff/indexer/verdicts";
-import { SpecInvalidError, askKirchhoff, backtestYaml, draftSpec } from "@kirchhoff/ai";
+import { SpecInvalidError, askKirchhoff, backtestYaml, draftSpec, runTopologyScout } from "@kirchhoff/ai";
 import {
   type AskEvent,
   type AskRequest,
@@ -19,13 +19,25 @@ import {
   type OpsResponse,
   type SpecDraftEvent,
   type SpecProposalResponse,
+  type SpecProposalsResponse,
+  type ScoutProposal,
+  type ScoutProposalsResponse,
+  type ScoutResponse,
+  type ReplayPlanResponse,
+  type Address,
   type ApiKeysResponse,
   type TokensResponse,
   type TokenStatusResponse,
   type VerdictsResponse,
   type TxRef,
 } from "@kirchhoff/sdk";
+import { randomUUID } from "node:crypto";
+import { parseSpec } from "@kirchhoff/engine/spec";
+import type { Notifier } from "@kirchhoff/indexer/notifier";
 import { askBackend, type AiServices } from "./ai.ts";
+import { IncidentPager } from "./pager.ts";
+import { replayPlan } from "./replay.ts";
+import { SpecResolver } from "./specs.ts";
 import { IssuerAuth, requireInternalKey } from "./auth.ts";
 import { ApiFailure, errorBody, notFound } from "./errors.ts";
 import { IncidentBuilder } from "./incident.ts";
@@ -51,6 +63,14 @@ export type AppDeps = {
   sseMaxMs: number;
   corsOrigins: string[] | true;
   logger?: boolean;
+  /** Incident pages (Telegram/Slack/PagerDuty); run by the long-running server only. */
+  notifier?: Notifier;
+  /** Mission Control base URL for Incident Room links in pages. */
+  webPublicUrl?: string | null;
+  /** CCV aggregator gRPC URL for replay plans (ccip-cli manual-exec --verifiers). */
+  aggregatorUrl?: string | null;
+  /** Fetch used to resolve spec URIs (tests inject one). */
+  specFetch?: typeof fetch;
 };
 
 export type App = FastifyInstance & { kirchhoff: { hub: StreamHub | null; rm: ReadModel; incidents: IncidentBuilder; auth: IssuerAuth } };
@@ -89,6 +109,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const auth = new IssuerAuth(deps.db, deps.issuerKey);
   const mat = new Materializer(deps.db, rm, incidents, (id) => deps.lab.get(id));
   const hub = deps.websocket ? new StreamHub(mat) : null;
+  const specResolver = new SpecResolver(deps.db, deps.specFetch ? { fetch: deps.specFetch } : {});
   app.decorate("kirchhoff", { hub, rm, incidents, auth });
   await auth.seed(deps.issuerKey).catch((e: unknown) => {
     console.error("kirchhoff api: could not seed the issuer key row", e instanceof Error ? e.message : e);
@@ -197,6 +218,21 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         const sse = openSse(req, reply);
         const emit = (e: SpecDraftEvent): void => {
           sse.send({ type: e.type, data: e });
+          // Drafts are stored by hash so a later onchain proposal of the same hash can be diffed.
+          if (e.type === "draft") {
+            const parsed = parseSpec(e.yaml);
+            if (parsed.ok) {
+              void deps.db
+                .query(
+                  `insert into specs (spec_hash, token_symbol, yaml, state, source) values ($1, $2, $3, 'draft', 'copilot')
+                   on conflict (spec_hash, token_symbol) do update set yaml = coalesce(specs.yaml, excluded.yaml)`,
+                  [e.specHash.toLowerCase(), parsed.spec.token, e.yaml],
+                )
+                .catch((err: unknown) => {
+                  console.error("kirchhoff api: could not store draft", err instanceof Error ? err.message : err);
+                });
+            }
+          }
         };
         if (!deps.ai.provider) {
           emit({ type: "error", message: "Spec Copilot is unavailable: no AI provider key is configured on this deployment." });
@@ -228,6 +264,66 @@ export async function buildApp(deps: AppDeps): Promise<App> {
           if (e instanceof SpecInvalidError) throw new ApiFailure(400, "BAD_REQUEST", e.message);
           throw e;
         }
+      });
+
+      r.get<{ Params: { token: string } }>("/tokens/:token/spec-proposals", async (req): Promise<SpecProposalsResponse> => {
+        const token = await rm.tokenRow(v.tokenSymbol(req.params.token));
+        const home = await rm.homeChain(token);
+        const items = await specResolver.proposals(token.symbol, home.chain, (home.issuer_safe ?? "0x0000000000000000000000000000000000000000"));
+        return { ...(await rm.meta(token)), token: token.symbol, items };
+      });
+
+      r.post<{ Body: unknown }>("/specs/scout", { config: { rateLimit: { max: 3, timeWindow: "1 minute" } } }, async (req, reply) => {
+        await auth.require(req.headers.authorization, "specs:draft");
+        const token = await rm.tokenRow(v.tokenSymbol(v.object(req.body).token));
+        const chains = await rm.chainRows();
+        const known = new Set(
+          chains.flatMap((c) => [c.token, c.escrow, c.weak_bridge, c.ccip_pool, c.ccip_lockbox, c.ledger, c.quarantine, c.feed, c.guard, c.registry]).filter((a): a is Address => a !== null).map((a) => a.toLowerCase()),
+        );
+        const sources = deps.ai.scoutSources();
+        const runId = randomUUID();
+        const startedAt = new Date().toISOString();
+        const wantsSse = (req.headers.accept ?? "").includes("text/event-stream");
+        const sse = wantsSse ? openSse(req, reply) : null;
+        const findings: ScoutProposal[] = [];
+        await runTopologyScout({
+          symbol: token.symbol,
+          name: token.name,
+          known,
+          sources,
+          provider: deps.ai.provider?.withKind("scout") ?? null,
+          model: deps.ai.fastModel,
+          db: deps.db,
+          specChains: token.chains,
+          emit: (e) => {
+            if (e.type === "finding") findings.push(e.finding);
+            sse?.send({ type: e.type, data: e });
+          },
+        });
+        if (sse) {
+          sse.end();
+          return;
+        }
+        const res: ScoutResponse = { ...(await rm.meta(token)), runId, startedAt, finishedAt: new Date().toISOString(), proposals: findings };
+        return reply.send(res);
+      });
+
+      r.get<{ Querystring: Record<string, string | undefined> }>("/specs/proposals", async (req): Promise<ScoutProposalsResponse> => {
+        await auth.require(req.headers.authorization, "specs:draft");
+        const token = await rm.tokenRow(v.tokenSymbol(req.query.token));
+        const rows = await deps.db.query<{ finding: ScoutProposal }>(
+          "select notes->'finding' as finding from specs where token_symbol = $1 and source = 'topology_scout' and notes ? 'finding' order by created_at desc limit 200",
+          [token.symbol],
+        );
+        return { ...(await rm.meta(token)), items: rows.rows.map((x) => x.finding) };
+      });
+
+      r.post<{ Params: { id: string } }>("/incidents/:id/replay-plan", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (req): Promise<ReplayPlanResponse> => {
+        const id = v.bytes32(req.params.id, "id");
+        const bundle = await incidents.bundle(id);
+        const token = await rm.tokenRow(bundle.incident.token);
+        const plan = replayPlan(bundle, bundle.tokenStatus, { enforcement: deps.ops.enforcement, aggregatorUrl: deps.aggregatorUrl ?? null });
+        return { ...(await rm.meta(token)), ...plan };
       });
 
       r.get<{ Params: { specHash: string } }>("/specs/:specHash", async (req): Promise<SpecProposalResponse> => {
@@ -410,7 +506,10 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return reply.status(202).send({ stored });
   });
 
+  const pager = deps.notifier && deps.websocket ? new IncidentPager(deps.db, incidents, deps.ai, deps.notifier, { linkBase: deps.webPublicUrl ?? null }) : null;
+  pager?.start();
   app.addHook("onClose", () => {
+    pager?.stop();
     hub?.stop();
     deps.lab.stop();
   });

@@ -36,6 +36,8 @@ export type IndexerConfig = {
   maxChunk: bigint;
   /** First block to index when a chain has no cursor and no deployedAtBlock. */
   defaultLookback: bigint;
+  /** deployments/<name>.json (engine schema) as written by demo/deploy-all, stored for spec hash verification. */
+  mergedDeployments?: { name: string; doc: unknown } | null;
 };
 
 export class ConfigError extends Error {
@@ -79,6 +81,14 @@ export async function loadDeploymentsDir(dir: string, mode: NetworkMode, symbol:
     [...merged, ...raw].map(async (f) => ({ name: f, json: JSON.parse(await readFile(join(dir, f), "utf8")) as unknown })),
   );
   return parseDeployments(docs, mode, symbol);
+}
+
+async function readMerged(dir: string, name: string): Promise<{ name: string; doc: unknown } | null> {
+  try {
+    return { name, doc: JSON.parse(await readFile(join(dir, `${name}.json`), "utf8")) as unknown };
+  } catch {
+    return null;
+  }
 }
 
 export function tokenConfigFromSpec(yamlText: string): TokenConfig {
@@ -142,5 +152,6 @@ export async function loadIndexerConfig(env: NodeJS.ProcessEnv = process.env): P
     pollMs: positiveInt(env, "INDEXER_POLL_MS", mode === "local" ? 1_000 : 4_000),
     maxChunk: BigInt(positiveInt(env, "INDEXER_MAX_CHUNK", 2_000)),
     defaultLookback: BigInt(positiveInt(env, "INDEXER_LOOKBACK_BLOCKS", 5_000)),
+    mergedDeployments: await readMerged(env.KIRCHHOFF_DEPLOYMENTS_DIR ?? join(REPO_ROOT, "deployments"), env.KIRCHHOFF_DEPLOYMENT_NAME ?? mode),
   };
 }

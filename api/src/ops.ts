@@ -23,7 +23,20 @@ export type OpsConfig = {
   /** One Judge /metrics endpoint per cell. */
   metrics?: { cellId: string; url: string }[];
   fetch?: typeof fetch;
+  /** Public API base (API_PUBLIC_URL) for `sources.verdicts`. */
+  publicBaseUrl?: string;
+  token?: string;
 };
+
+/** A /metrics URL is shown to clients only when it is publicly reachable (not loopback, private or cluster-internal). */
+export function publicUrl(url: string): boolean {
+  try {
+    const h = new URL(url).hostname;
+    return !(/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.0\.0\.0|\[?::1)/.test(h) || h.endsWith(".svc") || h.endsWith(".local") || h.endsWith(".internal") || !h.includes("."));
+  } catch {
+    return false;
+  }
+}
 
 function hostOf(url: string): string {
   try {
@@ -38,6 +51,10 @@ export class Ops {
   private readonly cfg: OpsConfig;
   private readonly probes = new Map<ChainKey, Probe[]>();
   private readonly lastDisagreement = new Map<ChainKey, number>();
+
+  get enforcement(): OpsResponse["enforcement"] {
+    return this.cfg.enforcement;
+  }
 
   constructor(db: Queryable, cfg: OpsConfig) {
     this.db = db;
@@ -159,6 +176,7 @@ export class Ops {
         lastHeartbeatAt: (s?.last ?? new Date(0)).toISOString(),
         version: declared?.version ?? "unknown",
         policyTransitions: s?.n ?? 0,
+        metricsUrl: this.metricsUrlOf(id),
       };
     });
     const live = [...scraped.values()].filter((x): x is JudgeScrape => x !== null);
@@ -170,7 +188,7 @@ export class Ops {
     }
     for (const [id, sc] of scraped) {
       if (cells.some((c) => c.id === id)) continue;
-      cells.push({ id, name: id, region: "unknown", healthy: sc !== null, lastHeartbeatAt: sc ? new Date().toISOString() : new Date(0).toISOString(), version: "unknown", policyTransitions: 0 });
+      cells.push({ id, name: id, region: "unknown", healthy: sc !== null, lastHeartbeatAt: sc ? new Date().toISOString() : new Date(0).toISOString(), version: "unknown", policyTransitions: 0, metricsUrl: this.metricsUrlOf(id) });
     }
     cells.sort((x, y) => x.id.localeCompare(y.id));
     if (live.length > 0) {
@@ -189,6 +207,7 @@ export class Ops {
         rpc,
         creRuns,
         enforcement: this.cfg.enforcement,
+        sources: this.sources(),
       };
     }
     const l = latency.rows[0];
@@ -204,6 +223,20 @@ export class Ops {
       rpc,
       creRuns,
       enforcement: this.cfg.enforcement,
+      sources: this.sources(),
+    };
+  }
+
+  private metricsUrlOf(cellId: string): string | null {
+    const url = this.cfg.metrics?.find((m) => m.cellId === cellId)?.url;
+    return url && publicUrl(url) ? url : null;
+  }
+
+  private sources(): OpsResponse["sources"] {
+    const base = (this.cfg.publicBaseUrl ?? "").replace(/\/+$/, "");
+    return {
+      verdicts: `${base}/v1/tokens/${encodeURIComponent(this.cfg.token ?? "kETH")}/verdicts`,
+      metrics: (this.cfg.metrics ?? []).map((m) => m.url).filter(publicUrl),
     };
   }
 }

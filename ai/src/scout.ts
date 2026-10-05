@@ -1,6 +1,6 @@
 import { keccak256, toHex, type Address, type PublicClient } from "viem";
 import type { Queryable } from "@kirchhoff/indexer";
-import { CHAINS, CHAIN_KEYS, erc20Abi, type ChainKey } from "@kirchhoff/sdk";
+import { CHAINS, CHAIN_KEYS, addressUrl, erc20Abi, isChainKey, type ChainKey, type ScoutProposal as ScoutFinding } from "@kirchhoff/sdk";
 import { UNTRUSTED_POLICY, houseStyle, parseModelJson, untrusted, validateJson } from "./guard.ts";
 import type { JsonSchema, LlmProvider } from "./provider.ts";
 
@@ -101,6 +101,38 @@ function ruleAssessment(c: ScoutCandidate, symbol: string): Pick<ScoutProposal, 
   return { assessment: "same_symbol_unrelated", why: `Name matches but symbol is ${c.symbol ?? "unknown"}.` };
 }
 
+export type ScoutTraceEvent =
+  | { type: "source"; source: string; candidates: number }
+  | { type: "finding"; finding: ScoutFinding }
+  | { type: "done"; count: number }
+  | { type: "error"; message: string };
+
+/** The Onboarding-screen shape (web/lib/api/types.ts ScoutProposal). Every claim links to its source. */
+export function toFinding(p: ScoutProposal, token: string, specChains: readonly string[], foundAt: Date): ScoutFinding {
+  const known = isChainKey(p.chain);
+  const newChain = known && !specChains.includes(p.chain);
+  const kind: ScoutFinding["kind"] = newChain ? "new_chain" : p.assessment === "likely_bridged_variant" ? "bridged_variant" : "same_symbol";
+  const label = known ? CHAINS[p.chain].label : p.chain;
+  const evidence = [
+    { label: `${p.name ?? "unnamed"} (${p.symbol ?? "no symbol"}) found by ${p.source}`, href: known ? addressUrl(p.chain, p.address) : `${p.source}:${p.address}` },
+    ...(known ? [{ label: `Blockscout: ${p.address}`, href: `${CHAINS[p.chain].blockscout}/address/${p.address}` }] : []),
+  ];
+  return {
+    id: keccak256(toHex(`scout:${p.chain}:${p.address}`)),
+    token,
+    kind,
+    chain: p.chain,
+    chainName: label,
+    address: p.address,
+    summary: p.why,
+    evidence,
+    confidence: p.assessment === "likely_bridged_variant" ? "high" : p.assessment === "needs_review" ? "medium" : "low",
+    specPatch: newChain ? `  - chain: ${p.chain}\n    token: "${p.address}"\n    minters: []   # confirm with list_role_grants before approving\n    decimals: 18` : null,
+    foundAt: foundAt.toISOString(),
+    status: "open",
+  };
+}
+
 export type ScoutOptions = {
   symbol: string;
   name: string;
@@ -110,13 +142,22 @@ export type ScoutOptions = {
   provider: LlmProvider | null;
   model: string;
   db?: Queryable;
+  /** Chains already in the spec (CRE names), to tell a new chain from a variant on a known one. */
+  specChains?: readonly string[];
+  emit?: (e: ScoutTraceEvent) => void;
+  now?: () => Date;
 };
 
 export async function runTopologyScout(opts: ScoutOptions): Promise<ScoutProposal[]> {
   const seen = new Set<string>();
   const candidates: ScoutCandidate[] = [];
   for (const s of opts.sources) {
-    for (const c of await s.search(opts.symbol, opts.name).catch(() => [])) {
+    const found = await s.search(opts.symbol, opts.name).catch((e: unknown) => {
+      opts.emit?.({ type: "error", message: `${s.id} search failed: ${(e instanceof Error ? e.message : String(e)).slice(0, 120)}` });
+      return [];
+    });
+    opts.emit?.({ type: "source", source: s.id, candidates: found.length });
+    for (const c of found) {
       const key = `${c.chain}:${c.address}`;
       if (seen.has(key) || opts.known.has(c.address)) continue;
       seen.add(key);
@@ -147,14 +188,18 @@ export async function runTopologyScout(opts: ScoutOptions): Promise<ScoutProposa
       // Triage is advisory; the rule assessment stands.
     }
   }
-  if (opts.db) {
-    for (const p of proposals) {
-      await opts.db.query(
-        `insert into specs (spec_hash, token_symbol, state, source, notes) values ($1, $2, 'draft', 'topology_scout', $3)
-         on conflict (spec_hash, token_symbol) do update set notes = excluded.notes`,
-        [keccak256(toHex(`scout:${p.chain}:${p.address}`)), opts.symbol, JSON.stringify({ proposal: p })],
-      );
-    }
+  const now = (opts.now ?? (() => new Date()))();
+  for (const p of proposals) {
+    const finding = toFinding(p, opts.symbol, opts.specChains ?? [], now);
+    // Re-runs keep the issuer's accept/dismiss decision on an existing finding.
+    await opts.db?.query(
+      `insert into specs (spec_hash, token_symbol, state, source, notes) values ($1, $2, 'draft', 'topology_scout', $3)
+       on conflict (spec_hash, token_symbol) do update
+         set notes = jsonb_set(excluded.notes, '{finding,status}', coalesce(specs.notes->'finding'->'status', '"open"'))`,
+      [finding.id, opts.symbol, JSON.stringify({ proposal: p, finding })],
+    );
+    opts.emit?.({ type: "finding", finding });
   }
+  opts.emit?.({ type: "done", count: proposals.length });
   return proposals;
 }

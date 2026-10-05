@@ -5,11 +5,18 @@ import WebSocket from "ws";
 import { keccak256, toHex, type Hex } from "viem";
 import { ChainIndexer, bootstrap, createChainClient, createDb, incidentIdOf, migrate, resetSchema, tokenConfigFromSpec, type Db, type IndexerConfig } from "@kirchhoff/indexer";
 import { ScriptedProvider } from "@kirchhoff/ai";
+import { parseSpec, specHash } from "@kirchhoff/engine/spec";
+import { Notifier, type IncidentNotice } from "@kirchhoff/indexer/notifier";
+import { IncidentPager } from "../src/pager.ts";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type {
   ApiErrorBody,
+  ReplayPlanResponse,
+  ScoutProposalsResponse,
+  ScoutResponse,
+  SpecProposalsResponse,
   ApiKeysResponse,
   CheckTransferResponse,
   EpochsResponse,
@@ -42,6 +49,8 @@ let cfg: IndexerConfig;
 let incidentId: Hex;
 let loopIncidentId: Hex;
 let baseUrl: string;
+/** Spec documents served at mocked spec URIs. */
+const specDocs = new Map<string, string>();
 
 async function tickAll(): Promise<void> {
   for (const chain of [HOME, ARB, BASE]) {
@@ -95,6 +104,10 @@ beforeAll(async () => {
     websocket: true,
     sseMaxMs: 1_500,
     corsOrigins: true,
+    specFetch: ((url: string | URL) => {
+      const body = specDocs.get(String(url));
+      return Promise.resolve(new Response(body ?? "not found", { status: body ? 200 : 404 }));
+    }) as typeof fetch,
   });
   await app.listen({ port: 0, host: "127.0.0.1" });
   const addr = app.server.address();
@@ -402,5 +415,124 @@ describe("MCP served by the API at /mcp", () => {
     expect(v.structuredContent?.incident.reason).toBe("DEBIT_NOT_FOUND");
     await client.close();
     expect((await fetch(`${baseUrl}/mcp`)).status).toBe(405);
+  });
+});
+
+/** A KIRCH-SPEC with this world's real addresses (no placeholders), optionally edited. */
+function worldSpecYaml(edit: (y: string) => string = (y) => y): string {
+  const dep = world.deployments.chains;
+  const h = dep[HOME];
+  const a = dep[ARB];
+  const b = dep[BASE];
+  if (!h || !a || !b) throw new Error("world incomplete");
+  let y = cfg.specYaml;
+  const fill = (re: RegExp, v: string | null): void => {
+    y = y.replace(re, (m) => m.replace(/0x0{40}/, v ?? ""));
+  };
+  fill(/canonical: "0x0{40}"/, h.token);
+  fill(/escrow: "0x0{40}"/, h.escrow);
+  fill(/alias: arb\n\s+token: "0x0{40}"/, a.token);
+  fill(/alias: base\n\s+token: "0x0{40}"/, b.token);
+  y = y.replace(/0x0{40}/g, h.ledger);
+  return edit(y);
+}
+
+describe("spec proposal diff alert (PRD 14 threat 7)", () => {
+  it("diffs a pending registry proposal against the active spec field by field, flagging loosened rules", async () => {
+    const reg = world.chains[HOME].dep.registry;
+    if (!reg) throw new Error("no registry");
+    const activeYaml = worldSpecYaml();
+    const pendingYaml = worldSpecYaml((y) => y.replace('tolerance_wei: "0"', 'tolerance_wei: "1000"').replace("on_stale: fail_closed", "on_stale: fail_open").replace("minters: [ccip_pool_base, weakbridge_base]", "minters: [ccip_pool_base, weakbridge_base, weakbridge_arb]"));
+    const hashOf = (y: string): `0x${string}` => {
+      const p = parseSpec(y);
+      if (!p.ok) throw new Error(p.errors.join("; "));
+      return specHash(p.spec);
+    };
+    const activeHash = hashOf(activeYaml);
+    const pendingHash = hashOf(pendingYaml);
+    // The active spec resolves from a stored draft (by hash); the pending one from its spec URI.
+    await db.query("insert into specs (spec_hash, token_symbol, yaml, state, source) values ($1, 'kETH', $2, 'draft', 'copilot')", [activeHash.toLowerCase(), activeYaml]);
+    const uri = "https://raw.githubusercontent.com/kirchhoff/specs/pending/kETH.yaml";
+    specDocs.set(uri, pendingYaml);
+    await world.write(world.chains[HOME], "owner", reg, "proposeSpec", [TOKEN_ID, activeHash, "ipfs://active"]);
+    await world.chains[HOME].pub.request({ method: "evm_increaseTime" as never, params: [700] as never });
+    await world.chains[HOME].pub.request({ method: "evm_mine" as never, params: [] as never });
+    await world.write(world.chains[HOME], "owner", reg, "activateSpec", [TOKEN_ID]);
+    await world.write(world.chains[HOME], "owner", reg, "proposeSpec", [TOKEN_ID, pendingHash, uri]);
+    await tickAll();
+    const { status, body } = await get<SpecProposalsResponse>("/v1/tokens/kETH/spec-proposals");
+    expect(status).toBe(200);
+    expectMeta(body);
+    const pending = body.items.find((p) => p.state === "proposed");
+    expect(pending).toMatchObject({ specHash: pendingHash.toLowerCase(), activeSpecHash: activeHash.toLowerCase(), timelockSeconds: 600, proposer: ACCOUNTS.owner.address.toLowerCase() });
+    const byPath = new Map(pending?.diff.map((d) => [d.path, d]));
+    expect(byPath.get("rules.loop.tolerance_wei")).toMatchObject({ kind: "changed", before: "0", after: "1000", effect: "loosens" });
+    expect(byPath.get("rules.on_stale")).toMatchObject({ before: "fail_closed", after: "fail_open", effect: "loosens" });
+    expect(byPath.get("remotes[base].minters")).toMatchObject({ effect: "loosens" });
+    expect(pending?.diff).toHaveLength(3);
+  });
+
+  it("an unverifiable proposal is surfaced as unverified, never as no change", async () => {
+    const reg = world.chains[HOME].dep.registry;
+    if (!reg) throw new Error("no registry");
+    await world.write(world.chains[HOME], "owner", reg, "proposeSpec", [TOKEN_ID, keccak256(toHex("mystery")), "https://evil.example/spec.yaml"]);
+    await tickAll();
+    const { body } = await get<SpecProposalsResponse>("/v1/tokens/kETH/spec-proposals");
+    const p = body.items.find((x) => x.specHash === keccak256(toHex("mystery")));
+    expect(p?.diff).toEqual([expect.objectContaining({ path: "spec_document", after: expect.stringMatching(/^unverified: /) as unknown })]);
+  });
+});
+
+describe("Topology Scout via API", () => {
+  it("POST /v1/specs/scout files a same-symbol deployment the spec does not list; GET /v1/specs/proposals lists it", async () => {
+    const extra = await world.deployContract(world.chains[BASE], "RemoteKETH", [ACCOUNTS.owner.address]);
+    const auth = { authorization: `Bearer ${ISSUER_KEY}` };
+    expect((await app.inject({ method: "POST", url: "/v1/specs/scout", payload: { token: "kETH" } })).statusCode).toBe(401);
+    const res = await app.inject({ method: "POST", url: "/v1/specs/scout", payload: { token: "kETH" }, headers: auth });
+    expect(res.statusCode).toBe(200);
+    const body = res.json<ScoutResponse>();
+    expectMeta(body);
+    const f = body.proposals.find((p) => p.address === extra);
+    expect(f).toMatchObject({ kind: "same_symbol", chain: BASE, chainName: "Base Sepolia", confidence: "medium", status: "open", specPatch: null });
+    expect(f?.evidence.length).toBeGreaterThan(0);
+    expect(body.proposals.some((p) => p.address === world.chains[BASE].dep.token)).toBe(false);
+    const list = await get<ScoutProposalsResponse>("/v1/specs/proposals?token=kETH", auth);
+    expect(list.body.items.map((i) => i.address)).toContain(extra);
+  });
+});
+
+describe("held message replay plan", () => {
+  it("is not allowed until CONSERVED and, under Fallback B, explains there is no CCIP message to execute", async () => {
+    const res = await app.inject({ method: "POST", url: `/v1/incidents/${incidentId}/replay-plan`, payload: {} });
+    expect(res.statusCode).toBe(200);
+    const plan = res.json<ReplayPlanResponse>();
+    expectMeta(plan);
+    expect(plan).toMatchObject({ incidentId, allowed: false, tokenStatus: "QUARANTINED", calls: [] });
+    expect(plan.reason).toMatch(/CONSERVED again/);
+    expect(plan.messages).toHaveLength(2);
+    const attacker = plan.messages.find((m) => m.sender === ACCOUNTS.attacker.address.toLowerCase());
+    expect(attacker).toMatchObject({ action: "skip" });
+    expect(attacker?.note).toMatch(/tainted/);
+    const other = plan.messages.find((m) => m.sender !== ACCOUNTS.attacker.address.toLowerCase());
+    expect(other).toMatchObject({ action: "skip" });
+    expect(other?.note).toMatch(/Fallback B/);
+  });
+});
+
+describe("incident pager", () => {
+  it("pages once with deficit, offending tx link, containment, Incident Room link and narrative", async () => {
+    const seen: IncidentNotice[] = [];
+    const notifier = new Notifier(db, [{ name: "slack", send: (n) => { seen.push(n); return Promise.resolve(); } }]);
+    const pager = new IncidentPager(db, app.kirchhoff.incidents, new AiServices({ db, ai: { provider: null, model: "none", fastModel: "none" }, mode: "local", rpc: world.rpc, etherscanKey: undefined, narratorWaitMs: 50 }), notifier, { linkBase: "https://kirchhoff.test" });
+    const paged = await pager.tick();
+    expect(paged).toContain(incidentId);
+    const n = seen.find((x) => x.incidentId === incidentId);
+    expect(n).toMatchObject({ reason: "DEBIT_NOT_FOUND", deficit: (-(4n * 10n ** 18n)).toString(), link: `https://kirchhoff.test/incidents/${incidentId}` });
+    expect(n?.offendingTxUrl).toMatch(/^https:\/\/sepolia\.etherscan\.io\/tx\/0x[0-9a-f]{64}$/);
+    expect(n?.contained.join(" ")).toMatch(/CCIP lanes frozen on .*tainted on Ethereum Sepolia/);
+    expect(n?.summary.length).toBeGreaterThan(20);
+    const loop = seen.find((x) => x.incidentId === loopIncidentId);
+    expect(loop?.offendingLabel).toMatch(/^Loop Rule BREACH report/);
+    expect(await pager.tick()).toEqual([]);
   });
 });
