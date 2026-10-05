@@ -490,7 +490,9 @@ export interface Incident {
   deltaAfter: WeiString;
   offending: {
     chain: ChainKey;
+    /** For a Loop Rule incident ("loop_rule") this is the home BREACH report, not a credit. */
     tx: TxRef;
+    /** Bridge id of the offending credit, or "loop_rule" when the Loop Rule (W2) caught a deficit with no single credit. */
     bridge: string;
     recipient: Address;
     amount: WeiString;
@@ -648,6 +650,124 @@ export interface SpecProposalResponse extends MirrorMeta {
 }
 
 /* ----------------------------------------------------------------------------------------------
+ * GET /tokens/{token}/spec-proposals: pending KIRCH-SPEC changes (PRD section 14 threat 7,
+ * "UI diff alert on every proposal"). Public: holders and stewards must see a pending change.
+ * -------------------------------------------------------------------------------------------- */
+
+export interface SpecFieldChange {
+  /** Dotted YAML path, e.g. "rules.loop.tolerance_wei" or "remotes[1].minters". */
+  path: string;
+  kind: "added" | "removed" | "changed";
+  /** Rendered scalar or one-line YAML; null when absent on that side. */
+  before: string | null;
+  after: string | null;
+  /**
+   * Deterministic classification by the API (never AI): "loosens" when the change weakens a rule
+   * (higher tolerance, longer windows, fail_open, an added minter, a removed response), "tightens"
+   * for the opposite, "neutral" otherwise.
+   */
+  effect: "loosens" | "tightens" | "neutral";
+}
+
+export interface PendingSpecProposal {
+  specHash: Bytes32;
+  /** Spec currently active in KirchhoffRegistry. */
+  activeSpecHash: Bytes32;
+  state: "proposed" | "active" | "superseded" | "cancelled";
+  proposeTx: TxRef;
+  proposedAt: IsoTime;
+  /** proposedAt + timelock; the change cannot activate before this. */
+  activatesAt: IsoTime;
+  timelockSeconds: number;
+  proposer: Address;
+  diff: SpecFieldChange[];
+}
+
+export interface SpecProposalsResponse extends MirrorMeta {
+  token: string;
+  /** Proposals still inside their timelock first; activated ones from the last 24h after. */
+  items: PendingSpecProposal[];
+}
+
+/* ----------------------------------------------------------------------------------------------
+ * Topology Scout (PRD section 11 feature 3): POST /specs/scout (issuer key) runs a crawl,
+ * GET /specs/proposals?token= lists what it filed. Findings are drafts; humans decide.
+ * -------------------------------------------------------------------------------------------- */
+
+export type ScoutFindingKind = "new_chain" | "bridged_variant" | "oft_peer" | "unlisted_minter" | "same_symbol";
+
+export interface ScoutProposal {
+  id: string;
+  token: string;
+  kind: ScoutFindingKind;
+  /** CRE chain name; may be a chain outside the current spec. */
+  chain: string;
+  chainName: string;
+  address: Address;
+  /** One line, deterministic from tool results. */
+  summary: string;
+  /** Every claim cites a tool result (same provenance rule as Spec Copilot). */
+  evidence: { label: string; href: string }[];
+  confidence: "high" | "medium" | "low";
+  /** YAML lines the issuer would add to the spec, or null when it needs human judgment. */
+  specPatch: string | null;
+  foundAt: IsoTime;
+  status: "open" | "accepted" | "dismissed";
+}
+
+export interface ScoutRequest {
+  token: string;
+}
+
+export interface ScoutResponse extends MirrorMeta {
+  runId: string;
+  startedAt: IsoTime;
+  finishedAt: IsoTime;
+  proposals: ScoutProposal[];
+}
+
+export interface ScoutProposalsResponse extends MirrorMeta {
+  items: ScoutProposal[];
+}
+
+/* ----------------------------------------------------------------------------------------------
+ * POST /incidents/{id}/replay-plan: the Safe-gated plan to replay held messages after recovery
+ * (PRD section 6 response.replay_requires: issuer_multisig). Read-only: it prepares, never sends.
+ * -------------------------------------------------------------------------------------------- */
+
+export interface ReplayPlanMessage {
+  messageId: Bytes32;
+  srcChain: ChainKey;
+  dstChain: ChainKey;
+  amount: WeiString;
+  sender: Address;
+  /** "skip" for messages from tainted senders, which stay held. */
+  action: "replay" | "skip";
+  note: string;
+}
+
+export interface SafeCall {
+  chain: ChainKey;
+  to: Address;
+  /** Hex calldata. */
+  data: Hex;
+  value: WeiString;
+  description: string;
+}
+
+export interface ReplayPlanResponse extends MirrorMeta {
+  incidentId: Bytes32;
+  /** False until the token is CONSERVED again. */
+  allowed: boolean;
+  reason: string | null;
+  tokenStatus: TokenStatus;
+  issuerSafe: Address;
+  messages: ReplayPlanMessage[];
+  /** Calls the issuer Safe must sign, per chain. Empty when not allowed. */
+  calls: SafeCall[];
+}
+
+/* ----------------------------------------------------------------------------------------------
  * POST /ask (Ask KIRCHHOFF, Server-Sent Events)
  * -------------------------------------------------------------------------------------------- */
 
@@ -755,6 +875,8 @@ export interface CellHealth {
   version: string;
   /** `verifier_message_transitions_total{stage="policy"}` over the window. */
   policyTransitions: number;
+  /** The Judge /metrics URL this cell's numbers were scraped from, when it is publicly reachable. */
+  metricsUrl: string | null;
 }
 
 export interface RpcAgreement {
@@ -786,6 +908,12 @@ export interface OpsResponse extends MirrorMeta {
   creRuns: CreRun[];
   /** Fallback B (KirchhoffTokenPool) or a live CCV cell. Shown honestly in the header. */
   enforcement: "ccv_cell" | "token_pool_fallback";
+  /**
+   * Where each figure comes from, so the UI can link every number to its source.
+   * `verdicts`: absolute URL of the verdict rows the latency and counts were computed from
+   * (e.g. ".../v1/tokens/kETH/verdicts"); `metrics`: Judge /metrics URLs scraped for the window.
+   */
+  sources: { verdicts: string; metrics: string[] };
 }
 
 /* ----------------------------------------------------------------------------------------------
