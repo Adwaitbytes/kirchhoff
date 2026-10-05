@@ -1,3 +1,4 @@
 binary.wasm
 .cre_build_tmp.wasm
 **/.cre_build_tmp.*
+.scn/

@@ -1,34 +1,42 @@
 /**
- * W4 Topology Watch (PRD section 8): on `SpecActivated`, every 10 minutes, and on every minter-role grant of the
- * protected token, checks that every account able to mint is listed in the spec. An unlisted minter raises EPOCH
- * DRIFT with reason SPEC_MISMATCH.
+ * W4 Topology Watch (PRD section 8): reloads the active spec and checks that every account able to mint, the CCIP
+ * pool registered for the token and that pool's peers all match it. Any difference raises EPOCH DRIFT with reason
+ * SPEC_MISMATCH and pages the issuer through the HTTP capability (CRE secrets, idempotency key = drift key).
  *
- * Trigger indexes: 0 = SpecActivated on the home registry, 1 = cron, then one RoleGranted(MINTER_ROLE) trigger per
- * remote chain in config.chains order (kETH: 2 = arb, 3 = base).
+ * Trigger indexes: 0 = SpecActivated (home registry, this token), 1 = cron, then RoleGranted(MINTER_ROLE) per remote
+ * chain (kETH: 2 = arb, 3 = base), then CCIP TokenAdminRegistry PoolSet(token) per chain that has a registry
+ * (public testnets: 4 = home, 5 = arb, 6 = base; none on Anvil).
  *
  * Production deploys W4's handlers inside W2 (CRE allows 3 workflows per org, INTERFACES.md Revision 2 item 6),
  * so its EPOCH is sent under W2's workflow id, which the ledger authorizes for EPOCH.
  */
 import { CronCapability, EVMClient, type EVMLog, handler, logTriggerConfig, Runner, type Runtime } from "@chainlink/cre-sdk";
 import { MULTICALL3, type W4Config } from "@kirchhoff/engine";
+import { encodeEventTopics, pad } from "viem";
 import { ReadBudget } from "../src/budget.ts";
 import { selectorMap, unixSeconds } from "../src/chains.ts";
 import { w4ConfigSchema, type W4ConfigInput } from "../src/config.ts";
 import { creChainIo, fromCreLog } from "../src/cre-io.ts";
+import { page, readNotifySecrets } from "../src/cre-notify.ts";
 import { withBudget } from "../src/io.ts";
-import { runTopology, watchedChains } from "../src/w4.ts";
+import { NOTIFY_SECRET_IDS } from "../src/notify.ts";
+import { poolSetChains, runTopology, TOPOLOGY_ABI, watchedChains, type TopologyTrigger } from "../src/w4.ts";
 
-const scan =
-  (grantChain: string | null) =>
-  (runtime: Runtime<W4Config>, log: EVMLog | null): string => {
-    const config = runtime.config;
-    const budget = new ReadBudget();
-    const io = withBudget(creChainIo(runtime, selectorMap(config.chains)), budget);
-    const grant = grantChain === null || log === null ? null : { chain: grantChain, log: fromCreLog(log) };
-    const outcome = runTopology(io, config, MULTICALL3, grant, unixSeconds(runtime.now()));
-    runtime.log(`W4 reads used ${budget.used}/15: ${budget.describe()}`);
-    return `findings=${outcome.findings.length} writes=${outcome.writes.length}`;
-  };
+const POOL_SET = encodeEventTopics({ abi: TOPOLOGY_ABI, eventName: "PoolSet" })[0];
+
+const run = (runtime: Runtime<W4Config>, trigger: TopologyTrigger): string => {
+  const config = runtime.config;
+  const budget = new ReadBudget();
+  const io = withBudget(creChainIo(runtime, selectorMap(config.chains)), budget);
+  const outcome = runTopology(io, config, MULTICALL3, trigger, unixSeconds(runtime.now()));
+  runtime.log(`W4 reads used ${budget.used}/15: ${budget.describe()}`);
+  let sent = 0;
+  if (outcome.text !== null && outcome.driftKey !== null) {
+    // W4's config carries no notifySecrets yet (ENGINE_REQUESTS.md R8): the issuer pager uses W3's secret ids.
+    sent = page(runtime, outcome.text, outcome.driftKey, readNotifySecrets(runtime, Object.values(NOTIFY_SECRET_IDS)));
+  }
+  return `findings=${outcome.findings.length} writes=${outcome.writes.length} notified=${sent}`;
+};
 
 const initWorkflow = (config: W4Config) => {
   const selectors = selectorMap(config.chains);
@@ -37,25 +45,29 @@ const initWorkflow = (config: W4Config) => {
     if (selector === undefined) throw new Error(`no selector for ${chain}`);
     return new EVMClient(selector);
   };
-  const fullScan = scan(null);
+  if (typeof POOL_SET !== "string") throw new Error("PoolSet topic missing");
   return [
     handler(
       client(config.registry.chain).logTrigger(
         logTriggerConfig({ addresses: [config.registry.address], topics: [[config.registry.specActivatedTopic0], [config.tokenId]] }),
       ),
-      (runtime: Runtime<W4Config>) => fullScan(runtime, null),
+      (runtime: Runtime<W4Config>, log: EVMLog) => run(runtime, { kind: "spec", log: fromCreLog(log) }),
     ),
-    handler(new CronCapability().trigger({ schedule: config.schedule }), (runtime: Runtime<W4Config>) => fullScan(runtime, null)),
+    handler(new CronCapability().trigger({ schedule: config.schedule }), (runtime: Runtime<W4Config>) => run(runtime, { kind: "scan" })),
     ...watchedChains(config).map((chain) =>
       handler(
         client(chain.name).logTrigger(
-          logTriggerConfig({
-            addresses: [chain.token],
-            topics: [[config.roleGrantedTopic0], [config.minterRole]],
-            confidence: chain.triggerConfidence,
-          }),
+          logTriggerConfig({ addresses: [chain.token], topics: [[config.roleGrantedTopic0], [config.minterRole]], confidence: chain.triggerConfidence }),
         ),
-        (runtime: Runtime<W4Config>, log: EVMLog) => scan(chain.name)(runtime, log),
+        (runtime: Runtime<W4Config>, log: EVMLog) => run(runtime, { kind: "grant", chain: chain.name, log: fromCreLog(log) }),
+      ),
+    ),
+    ...poolSetChains(config).map((chain) =>
+      handler(
+        client(chain.name).logTrigger(
+          logTriggerConfig({ addresses: [chain.tokenAdminRegistry], topics: [[POOL_SET], [pad(chain.token)]], confidence: chain.triggerConfidence }),
+        ),
+        (runtime: Runtime<W4Config>, log: EVMLog) => run(runtime, { kind: "pool", chain: chain.name, log: fromCreLog(log) }),
       ),
     ),
   ];

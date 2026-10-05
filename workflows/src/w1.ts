@@ -109,6 +109,8 @@ export function findDebit(
   pinned: bigint,
 ): Debit | null {
   const selector = BigInt(source.selector);
+  // Nothing above genesis is confident yet, so no debit can be.
+  if (pinned < 1n) return null;
   const window = logWindow(pinned, BigInt(lookup.searchWindowBlocks));
   const idTopics: Hex[][] = [[lookup.topic0]];
   for (let i = 1; i < lookup.messageIdTopicIndex; i++) idTopics.push([]);

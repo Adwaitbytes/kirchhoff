@@ -92,10 +92,6 @@ export function runResponder(io: ChainIo, config: W3Config, multicall3: Hex, log
   return { kind: "contained", incidentId: id, breach, writes, skipped };
 }
 
-export type NotifySecrets = { telegramBotToken: string; telegramChatId: string; slackWebhookUrl: string };
-
-export type Notification = { channel: "telegram" | "slack"; url: string; body: string; idempotencyKey: Hex };
-
 function reasonText(reason: number): string {
   try {
     return reasonName(toReason(reason));
@@ -113,26 +109,4 @@ export function incidentText(token: string, id: Hex, breach: BreachEvent): strin
     `recipient ${breach.recipient} amount ${breach.amount}`,
     "CCIP lanes frozen, recipient tainted, feed flipped. Replay requires the issuer Safe.",
   ].join("\n");
-}
-
-/**
- * One request per configured channel; a channel whose secret is empty is skipped, never an error. The
- * idempotency key is the incident id: every DON node sends the request, and retries must never double-page.
- */
-export function buildNotifications(token: string, id: Hex, breach: BreachEvent, secrets: NotifySecrets): { requests: Notification[]; skipped: string[] } {
-  const text = incidentText(token, id, breach);
-  const requests: Notification[] = [];
-  const skipped: string[] = [];
-  if (secrets.telegramBotToken !== "" && secrets.telegramChatId !== "") {
-    requests.push({
-      channel: "telegram",
-      url: `https://api.telegram.org/bot${secrets.telegramBotToken}/sendMessage`,
-      body: JSON.stringify({ chat_id: secrets.telegramChatId, text, disable_web_page_preview: true }),
-      idempotencyKey: id,
-    });
-  } else skipped.push("telegram");
-  if (secrets.slackWebhookUrl !== "") {
-    requests.push({ channel: "slack", url: secrets.slackWebhookUrl, body: JSON.stringify({ text }), idempotencyKey: id });
-  } else skipped.push("slack");
-  return { requests, skipped };
 }

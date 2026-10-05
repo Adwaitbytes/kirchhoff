@@ -1,27 +1,77 @@
 import { blocksHash, Reason, ReportType, Status, type Hex, type PinnedBlock, type W4Config } from "@kirchhoff/engine";
-import { decodeFunctionResult, encodeFunctionData } from "viem";
+import { decodeAbiParameters, decodeFunctionResult, encodeAbiParameters, encodeFunctionData, keccak256, parseAbi, stringToHex } from "viem";
 import { ACCESS_CONTROL_ABI, LEDGER_ABI } from "./abi.ts";
 import { CRE_LOG_QUERY_BLOCK_LIMIT, logWindow } from "./budget.ts";
 import { ledgerTargets, sameAddress, statusLabel } from "./chains.ts";
 import type { ChainIo, ChainLog } from "./io.ts";
-import { decodeAggregate3, encodeAggregate3, successful, type Call } from "./multicall.ts";
-import { topologyEvidence, writeToLedgers, type WriteResult } from "./reports.ts";
+import { decodeAggregate3, encodeAggregate3, successful, type Call, type CallResult } from "./multicall.ts";
+import { writeToLedgers, type WriteResult } from "./reports.ts";
 
 type TopologyChain = W4Config["chains"][number];
 
 /**
- * 100-block RoleGranted windows scanned per remote chain on the cron / SpecActivated path. Budget with two
- * remotes: 2 latest headers + 2 x 4 filterLogs + 3 aggregate3 (hasRole + ledger state) = 13 of 15 reads.
- * Grants older than 400 blocks are caught by the per-chain RoleGranted log triggers when they happen.
+ * 100-block RoleGranted windows scanned per remote chain on the cron / SpecActivated path. Budget with two remotes
+ * and three chains: 2 latest headers + 2 x 3 filterLogs + 3 state Multicall3 + up to 3 pool-peer Multicall3 = 14
+ * of 15. Grants older than the windows are caught by the per-chain RoleGranted triggers when they happen, and
+ * pool / peer drift is read from current state, so it has no window at all.
  */
-export const W4_WINDOWS_PER_CHAIN = 4;
+export const W4_WINDOWS_PER_CHAIN = 3;
+
+/**
+ * CCIP TokenAdminRegistry 1.5.0 per public testnet chain id (docs/research/ccip.md section 1, checked live with
+ * typeAndVersion). The compiled W4 config does not carry it yet (ENGINE_REQUESTS.md R8); Anvil has none, so the
+ * pool checks there start from the spec pools instead.
+ */
+export const TOKEN_ADMIN_REGISTRIES: Readonly<Record<number, Hex>> = {
+  11155111: "0x95F29FEE11c5C55d26cCcf1DB6772DE953B37B82",
+  421614: "0x8126bE56454B628a88C17849B9ED99dd5a11Bd2f",
+  84532: "0x736D0bBb318c1B27Ff686cd19804094E66250e17",
+};
+
+export const TOPOLOGY_ABI = parseAbi([
+  "function getPool(address token) view returns (address)",
+  "function getSupportedChains() view returns (uint64[])",
+  "function getRemotePools(uint64 remoteChainSelector) view returns (bytes[])",
+  "function activeSpecHash(bytes32 tokenId) view returns (bytes32)",
+  "event PoolSet(address indexed token, address indexed previousPool, address indexed newPool)",
+]);
+
+const ZERO_ADDRESS: Hex = "0x0000000000000000000000000000000000000000";
+const ZERO_HASH: Hex = `0x${"0".repeat(64)}`;
 
 /** Chains whose token has mint roles to watch: every remote (the home canonical token is Ownable, not roles). */
 export function watchedChains(config: W4Config): TopologyChain[] {
   return config.chains.filter((c) => !c.isHome);
 }
 
-export type Finding = { chain: TopologyChain; minter: Hex };
+/** Chains with a CCIP TokenAdminRegistry, in config order: the `PoolSet` triggers. */
+export function poolSetChains(config: W4Config): (TopologyChain & { tokenAdminRegistry: Hex })[] {
+  return config.chains.flatMap((c) => {
+    const registry = TOKEN_ADMIN_REGISTRIES[c.chainId];
+    return registry === undefined ? [] : [{ ...c, tokenAdminRegistry: registry }];
+  });
+}
+
+export type Finding =
+  | { kind: "minter"; chain: TopologyChain; account: Hex }
+  | { kind: "pool"; chain: TopologyChain; pool: Hex }
+  | { kind: "peer"; chain: TopologyChain; detail: string }
+  | { kind: "spec"; active: Hex; running: Hex };
+
+export function describe(f: Finding): string {
+  switch (f.kind) {
+    case "minter":
+      return `${f.chain.name}: ${f.account} holds MINTER_ROLE but is not a spec minter`;
+    case "pool":
+      return `${f.chain.name}: CCIP TokenAdminRegistry pool ${f.pool} is not a spec pool`;
+    case "peer":
+      return `${f.chain.name}: ${f.detail}`;
+    case "spec":
+      return f.active === ZERO_HASH
+        ? `registry has no active spec; workflows run ${f.running}`
+        : `active spec ${f.active} differs from the spec the workflows run (${f.running})`;
+  }
+}
 
 function topicAddress(topic: Hex | undefined): Hex | null {
   if (topic === undefined) return null;
@@ -46,44 +96,142 @@ export function unlisted(chain: TopologyChain, accounts: readonly Hex[]): Hex[] 
 
 type LedgerView = { status: number; delta: bigint; latestEpochId: bigint };
 
+type ChainState = { chain: TopologyChain; ledger: LedgerView; minters: Hex[]; pool: Hex | null; activeSpecHash: Hex | null };
+
+type Read = { call: Call; use: (r: CallResult) => void };
+
 /**
- * One aggregate3 per chain at the latest block: `hasRole(MINTER_ROLE, candidate)` for each unlisted candidate (a
- * revoked grant is not a finding) plus the ledger status and latest epoch.
+ * Round 1, one aggregate3 per chain at latest: ledger status and epoch, `hasRole(MINTER_ROLE, candidate)` per
+ * unlisted candidate (a revoked grant is not a finding), the CCIP pool registered for the token, and on the
+ * registry chain the active spec hash (PRD section 6 spec lifecycle: the workflows must run the activated spec).
  */
-function confirm(io: ChainIo, config: W4Config, multicall3: Hex, chain: TopologyChain, candidates: readonly Hex[]): { minters: Hex[]; ledger: LedgerView } {
-  const calls: Call[] = [
-    { target: chain.ledger, callData: encodeFunctionData({ abi: LEDGER_ABI, functionName: "statusOf", args: [config.tokenId] }) },
-    { target: chain.ledger, callData: encodeFunctionData({ abi: LEDGER_ABI, functionName: "latestEpoch", args: [config.tokenId] }) },
+function readState(io: ChainIo, config: W4Config, multicall3: Hex, chain: TopologyChain, candidates: readonly Hex[]): ChainState {
+  const state: ChainState = { chain, ledger: { status: 0, delta: 0n, latestEpochId: 0n }, minters: [], pool: null, activeSpecHash: null };
+  const reads: Read[] = [
+    {
+      call: { target: chain.ledger, callData: encodeFunctionData({ abi: LEDGER_ABI, functionName: "statusOf", args: [config.tokenId] }) },
+      use: (r) => {
+        const [status, delta] = decodeFunctionResult({ abi: LEDGER_ABI, functionName: "statusOf", data: successful(r, `${chain.name} statusOf`) });
+        state.ledger.status = status;
+        state.ledger.delta = delta;
+      },
+    },
+    {
+      call: { target: chain.ledger, callData: encodeFunctionData({ abi: LEDGER_ABI, functionName: "latestEpoch", args: [config.tokenId] }) },
+      use: (r) => {
+        state.ledger.latestEpochId = decodeFunctionResult({ abi: LEDGER_ABI, functionName: "latestEpoch", data: successful(r, `${chain.name} latestEpoch`) }).epochId;
+      },
+    },
     ...candidates.map((account) => ({
-      target: chain.token,
-      callData: encodeFunctionData({ abi: ACCESS_CONTROL_ABI, functionName: "hasRole", args: [config.minterRole, account] }),
+      call: { target: chain.token, callData: encodeFunctionData({ abi: ACCESS_CONTROL_ABI, functionName: "hasRole", args: [config.minterRole, account] }) },
+      use: (r: CallResult) => {
+        if (r.success && r.returnData !== "0x" && decodeFunctionResult({ abi: ACCESS_CONTROL_ABI, functionName: "hasRole", data: r.returnData })) state.minters.push(account);
+      },
     })),
   ];
-  const results = decodeAggregate3(io.call(chain.name, multicall3, encodeAggregate3(calls), { tag: "latest" }), calls.length);
-  const [status, delta] = decodeFunctionResult({ abi: LEDGER_ABI, functionName: "statusOf", data: successful(results[0], `${chain.name} statusOf`) });
-  const epoch = decodeFunctionResult({ abi: LEDGER_ABI, functionName: "latestEpoch", data: successful(results[1], `${chain.name} latestEpoch`) });
-  const minters = candidates.filter((_, i) => {
-    const r = results[i + 2];
-    return r !== undefined && r.success && decodeFunctionResult({ abi: ACCESS_CONTROL_ABI, functionName: "hasRole", data: r.returnData });
-  });
-  return { minters, ledger: { status, delta, latestEpochId: epoch.epochId } };
+  const tokenAdminRegistry = TOKEN_ADMIN_REGISTRIES[chain.chainId];
+  if (tokenAdminRegistry !== undefined) {
+    reads.push({
+      call: { target: tokenAdminRegistry, callData: encodeFunctionData({ abi: TOPOLOGY_ABI, functionName: "getPool", args: [chain.token] }) },
+      use: (r) => {
+        const pool = decodeFunctionResult({ abi: TOPOLOGY_ABI, functionName: "getPool", data: successful(r, `${chain.name} getPool`) });
+        state.pool = pool.toLowerCase() === ZERO_ADDRESS ? null : (pool.toLowerCase() as Hex);
+      },
+    });
+  }
+  if (config.registry.chain === chain.name) {
+    reads.push({
+      call: { target: config.registry.address, callData: encodeFunctionData({ abi: TOPOLOGY_ABI, functionName: "activeSpecHash", args: [config.tokenId] }) },
+      use: (r) => {
+        state.activeSpecHash = decodeFunctionResult({ abi: TOPOLOGY_ABI, functionName: "activeSpecHash", data: successful(r, "activeSpecHash") }).toLowerCase() as Hex;
+      },
+    });
+  }
+  const results = decodeAggregate3(io.call(chain.name, multicall3, encodeAggregate3(reads.map((r) => r.call)), { tag: "latest" }), reads.length);
+  results.forEach((r, i) => reads[i]?.use(r));
+  return state;
 }
 
-export type TopologyOutcome = { findings: Finding[]; writes: WriteResult[]; scanned: PinnedBlock[] };
+function decodeRemotePool(raw: Hex): Hex | null {
+  // EVM remote pools are abi.encode(address): exactly one 32-byte word.
+  if (raw.length !== 66) return null;
+  const [address] = decodeAbiParameters([{ type: "address" }], raw);
+  return address.toLowerCase() as Hex;
+}
 
 /**
- * PRD section 8 W4. `grants` is either the RoleGranted log that triggered this run (exact, no scan) or null for
- * the cron / SpecActivated path, which scans the latest windows. An unlisted minter that still holds the role
- * raises EPOCH DRIFT with reason SPEC_MISMATCH on every ledger that is CONSERVED or DRIFT (an UNKNOWN ledger
- * cannot start in DRIFT; a contained one is already failing every message).
+ * Pool checks from current state, so a pool swap or a peer added long ago is seen by every run:
+ * - on a remote, the registered CCIP pool must be a spec minter of that chain;
+ * - round 2 (one aggregate3 per chain with a known pool): its supported chains must all be spec chains, and for
+ *   every other spec chain whose pool is known, its remote pools must be exactly that pool (the peer set).
+ * Chains with no TokenAdminRegistry (Anvil) or no registered pool are skipped and logged.
  */
-export function runTopology(io: ChainIo, config: W4Config, multicall3: Hex, grant: { chain: string; log: ChainLog } | null, now: bigint): TopologyOutcome {
+function checkPools(io: ChainIo, config: W4Config, multicall3: Hex, states: readonly ChainState[]): Finding[] {
+  const findings: Finding[] = [];
+  const specSelectors = new Set(config.chains.map((c) => c.selector));
+  for (const s of states) {
+    if (s.pool === null) {
+      io.log(`${s.chain.name}: no CCIP TokenAdminRegistry pool to check`);
+      continue;
+    }
+    if (!s.chain.isHome && !s.chain.expectedMinters.some((m) => sameAddress(m, s.pool ?? ZERO_ADDRESS))) findings.push({ kind: "pool", chain: s.chain, pool: s.pool });
+    const peers = states.filter((o) => o !== s && o.pool !== null);
+    const reads: Read[] = [
+      {
+        call: { target: s.pool, callData: encodeFunctionData({ abi: TOPOLOGY_ABI, functionName: "getSupportedChains" }) },
+        use: (r) => {
+          const supported = decodeFunctionResult({ abi: TOPOLOGY_ABI, functionName: "getSupportedChains", data: successful(r, `${s.chain.name} getSupportedChains`) });
+          for (const sel of supported) {
+            if (!specSelectors.has(sel.toString())) findings.push({ kind: "peer", chain: s.chain, detail: `pool ${s.pool ?? ""} supports chain ${sel.toString()} outside the spec` });
+          }
+        },
+      },
+      ...peers.map((o) => ({
+        call: { target: s.pool ?? ZERO_ADDRESS, callData: encodeFunctionData({ abi: TOPOLOGY_ABI, functionName: "getRemotePools", args: [BigInt(o.chain.selector)] }) },
+        use: (r: CallResult) => {
+          // A revert means the peer chain is not configured at all, which only removes a lane: not a mint path.
+          if (!r.success) return;
+          const pools = decodeFunctionResult({ abi: TOPOLOGY_ABI, functionName: "getRemotePools", data: r.returnData }).map((p) => decodeRemotePool(p));
+          for (const p of pools) {
+            if (p !== o.pool) findings.push({ kind: "peer", chain: s.chain, detail: `pool ${s.pool ?? ""} trusts remote pool ${p ?? "(non-EVM bytes)"} on ${o.chain.name}, expected ${o.pool ?? ""}` });
+          }
+        },
+      })),
+    ];
+    const results = decodeAggregate3(io.call(s.chain.name, multicall3, encodeAggregate3(reads.map((r) => r.call)), { tag: "latest" }), reads.length);
+    results.forEach((r, i) => reads[i]?.use(r));
+  }
+  return findings;
+}
+
+/** Idempotency key of a drift: the same findings page once, however many runs see them. */
+export function driftKey(tokenId: Hex, findings: readonly Finding[]): Hex {
+  const lines = findings.map(describe).sort();
+  return keccak256(encodeAbiParameters([{ type: "bytes32" }, { type: "string[]" }], [tokenId, lines]));
+}
+
+const TOPOLOGY_EVIDENCE = stringToHex("KIRCHHOFF_TOPOLOGY_V2", { size: 32 });
+
+export type TopologyTrigger =
+  | { kind: "scan" }
+  | { kind: "spec"; log: ChainLog }
+  | { kind: "grant"; chain: string; log: ChainLog }
+  | { kind: "pool"; chain: string; log: ChainLog };
+
+export type TopologyOutcome = { findings: Finding[]; writes: WriteResult[]; scanned: PinnedBlock[]; driftKey: Hex | null; text: string | null };
+
+/**
+ * PRD section 8 W4: reload the active spec, scan for new minters, pools and peers, raise DRIFT SPEC_MISMATCH and
+ * hand the caller a page (text + idempotency key). The RoleGranted window scan runs only on the cron and
+ * SpecActivated paths; a trigger log is evidence by itself. DRIFT goes to every ledger that is CONSERVED or DRIFT
+ * (an UNKNOWN ledger cannot start in DRIFT; a contained one already fails every message).
+ */
+export function runTopology(io: ChainIo, config: W4Config, multicall3: Hex, trigger: TopologyTrigger, now: bigint): TopologyOutcome {
   const scanned: PinnedBlock[] = [];
   const candidates = new Map<string, Hex[]>();
   for (const chain of watchedChains(config)) {
-    if (grant !== null) {
-      candidates.set(chain.name, grant.chain === chain.name ? unlisted(chain, grantedMinters(config, [grant.log])) : []);
-      if (grant.chain === chain.name) scanned.push({ chain: BigInt(chain.selector), block: grant.log.blockNumber });
+    if (trigger.kind === "grant" || trigger.kind === "pool") {
+      candidates.set(chain.name, trigger.kind === "grant" && trigger.chain === chain.name ? unlisted(chain, grantedMinters(config, [trigger.log])) : []);
       continue;
     }
     const head = io.header(chain.name, { tag: "latest" }).number;
@@ -92,38 +240,38 @@ export function runTopology(io: ChainIo, config: W4Config, multicall3: Hex, gran
     const logs: ChainLog[] = [];
     for (let w = 0; w < W4_WINDOWS_PER_CHAIN; w++) {
       const end = head - BigInt(w) * CRE_LOG_QUERY_BLOCK_LIMIT;
-      if (end < 0n) break;
-      logs.push(
-        ...io.logs(chain.name, {
-          addresses: [chain.token],
-          topics: [[config.roleGrantedTopic0], [config.minterRole]],
-          ...logWindow(end),
-        }),
-      );
+      if (end < 1n) break;
+      logs.push(...io.logs(chain.name, { addresses: [chain.token], topics: [[config.roleGrantedTopic0], [config.minterRole]], ...logWindow(end) }));
     }
     candidates.set(chain.name, unlisted(chain, grantedMinters(config, logs)));
   }
+  if (trigger.kind !== "scan") {
+    const chainName = trigger.kind === "spec" ? config.registry.chain : trigger.chain;
+    const chain = config.chains.find((c) => c.name === chainName);
+    if (chain !== undefined) scanned.push({ chain: BigInt(chain.selector), block: trigger.log.blockNumber });
+  }
 
+  const states = config.chains.map((chain) => readState(io, config, multicall3, chain, candidates.get(chain.name) ?? []));
   const findings: Finding[] = [];
-  const ledgers = new Map<string, LedgerView>();
-  for (const chain of config.chains) {
-    const { minters, ledger } = confirm(io, config, multicall3, chain, candidates.get(chain.name) ?? []);
-    ledgers.set(chain.name, ledger);
-    for (const minter of minters) findings.push({ chain, minter });
-  }
-  if (findings.length === 0) {
-    io.log("topology matches the spec: no unlisted minter holds the role");
-    return { findings, writes: [], scanned };
-  }
-  for (const f of findings) io.log(`SPEC_MISMATCH: ${f.minter} can mint ${config.token} on ${f.chain.name} but is not in the spec`);
+  const active = states.find((s) => s.activeSpecHash !== null)?.activeSpecHash ?? null;
+  if (active !== null && active !== config.specHash.toLowerCase()) findings.push({ kind: "spec", active, running: config.specHash });
+  for (const s of states) for (const account of s.minters) findings.push({ kind: "minter", chain: s.chain, account });
+  findings.push(...checkPools(io, config, multicall3, states));
 
+  if (findings.length === 0) {
+    io.log(`topology matches spec ${config.specHash}: active spec, minters, pools and peers`);
+    return { findings, writes: [], scanned, driftKey: null, text: null };
+  }
+  for (const f of findings) io.log(`SPEC_MISMATCH: ${describe(f)}`);
+
+  const key = driftKey(config.tokenId, findings);
   const hash = blocksHash(scanned);
-  const evidenceHash = topologyEvidence({ blocksHash: hash, findings: findings.map((f) => ({ chain: BigInt(f.chain.selector), minter: f.minter })) });
-  const latestId = [...ledgers.values()].reduce((m, l) => (l.latestEpochId > m ? l.latestEpochId : m), 0n);
+  const evidenceHash = keccak256(encodeAbiParameters([{ type: "bytes32" }, { type: "bytes32" }, { type: "bytes32" }], [TOPOLOGY_EVIDENCE, hash, key]));
+  const latestId = states.reduce((m, s) => (s.ledger.latestEpochId > m ? s.ledger.latestEpochId : m), 0n);
   const epochId = latestId + 1n > now ? latestId + 1n : now;
   const writes: WriteResult[] = [];
   for (const target of ledgerTargets(config.chains)) {
-    const ledger = ledgers.get(target.chain);
+    const ledger = states.find((s) => s.chain.name === target.chain)?.ledger;
     if (ledger === undefined || (ledger.status !== Status.CONSERVED && ledger.status !== Status.DRIFT)) {
       io.log(`skip SPEC_MISMATCH on ${target.chain}: ledger status ${ledger === undefined ? "unread" : statusLabel(ledger.status)}`);
       continue;
@@ -131,17 +279,10 @@ export function runTopology(io: ChainIo, config: W4Config, multicall3: Hex, gran
     writes.push(
       ...writeToLedgers(io, [target], config.tokenId, {
         reportType: ReportType.EPOCH,
-        payload: {
-          epochId,
-          delta: ledger.delta,
-          blocksHash: hash,
-          evidenceHash,
-          status: Status.DRIFT,
-          reason: Reason.SPEC_MISMATCH,
-          settledMessageIds: [],
-        },
+        payload: { epochId, delta: ledger.delta, blocksHash: hash, evidenceHash, status: Status.DRIFT, reason: Reason.SPEC_MISMATCH, settledMessageIds: [] },
       }),
     );
   }
-  return { findings, writes, scanned };
+  const text = [`KIRCHHOFF: ${config.token} DRIFT (SPEC_MISMATCH)`, ...findings.map((f) => `- ${describe(f)}`), "The token's mint topology differs from its approved KIRCH-SPEC."].join("\n");
+  return { findings, writes, scanned, driftKey: key, text };
 }

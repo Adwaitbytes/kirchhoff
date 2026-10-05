@@ -5,7 +5,9 @@
  *   pnpm --filter @kirchhoff/workflows scenarios [--only 1,3]
  *
  * Each scenario deploys a fresh suite (contracts/script/Deploy.s.sol + ConfigureLanes.s.sol) under its own network
- * name, regenerates config.local.json with the engine compiler (gen-config), and starts from an UNKNOWN ledger
+ * name, compiles its own configs with the engine compiler (gen-config --out .scn/<network>, passed to every
+ * simulation with --config, so the shared config.local.json other tools use is never touched), activates the
+ * compiled spec in the local KirchhoffRegistry through the issuer, and starts from an UNKNOWN ledger
  * that a first W2 epoch moves to CONSERVED. Commands, workflow logs and assertions are written into
  * SIMULATION_LOG.md between the scenario markers.
  */
@@ -16,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { Reason, Status, type Hex } from "@kirchhoff/engine";
 import { decodeEventLog, keccak256, parseAbi, parseEther, toHex, type Log, type TransactionReceipt } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { w1ConfigSchema, w4ConfigSchema } from "../src/config.ts";
+import { w1ConfigSchema, w2ConfigSchema, w4ConfigSchema } from "../src/config.ts";
 import { creditTriggerGroups } from "../src/w1.ts";
 import { watchedChains } from "../src/w4.ts";
 import { buildWasm, simulate, simulateCommand, type SimulateArgs, type SimulateResult } from "./lib/cre.ts";
@@ -24,7 +26,9 @@ import { loadEnv, privateKey } from "./lib/env.ts";
 import {
   deployLocalOffRamp,
   deploySuite,
+  anvil,
   installInfra,
+  startAnvils,
   LOCAL_ROUTER_ABI,
   localChains,
   mineToFinality,
@@ -53,7 +57,14 @@ const attacker = privateKeyToAccount(ATTACKER).address;
 const verifier = privateKeyToAccount(VERIFIER);
 const TOKEN_ID = keccak256(toHex("kETH"));
 
-const chains = localChains();
+/** Private chains for the harness (project.yaml target `scenarios`); see startAnvils. */
+const TARGET = "scenarios";
+const BASE_PORT = 18545;
+const anvils = await startAnvils(BASE_PORT, REPO);
+process.on("exit", () => {
+  for (const p of anvils) p.kill();
+});
+const chains = localChains(BASE_PORT);
 const byAlias = (alias: Alias): LocalChain => {
   const c = chains.find((x) => x.alias === alias);
   if (c === undefined) throw new Error(`no chain ${alias}`);
@@ -84,6 +95,10 @@ const LEDGER_ABI = parseAbi([
   "function breachOf(bytes32 incidentId) view returns (Breach)",
   "function isConsumed(bytes32 messageId) view returns (bool)",
   "event BreachRecorded(bytes32 indexed tokenId, uint16 reason, bytes32 evidenceHash, uint64 offendingChain, bytes32 offendingTx, address recipient, uint256 amount)",
+]);
+const REGISTRY_ABI = parseAbi([
+  "function proposeSpec(bytes32 tokenId, bytes32 specHash, string specURI)",
+  "function activateSpec(bytes32 tokenId)",
 ]);
 const OFFRAMP_ABI = parseAbi([
   "function execute(address pool, uint64 sourceChainSelector, bytes32 messageId, address receiver, uint256 amount, address localToken, address sourcePool)",
@@ -134,8 +149,10 @@ async function freshSuite(n: number): Promise<Suite> {
     await send(arb, await admin.writeContract({ address: addr("arb", "ccipRouter"), abi: LOCAL_ROUTER_ABI, functionName: "setOffRamp", args: [src.selector, offRamp, true] }));
   }
   writeRecord(REPO, network, "arb", { ...deployment.records.arb, ccipOffRamp: offRamp });
-  say(`$ node scripts/gen-config.ts --target local --network ${network}`);
-  execFileSync("node", ["scripts/gen-config.ts", "--target", "local", "--network", network], { cwd: WORKFLOWS, stdio: ["ignore", "pipe", "pipe"] });
+  configDir = `.scn/${network}`;
+  say(`$ node scripts/gen-config.ts --target local --network ${network} --out ${configDir}`);
+  execFileSync("node", ["scripts/gen-config.ts", "--target", "local", "--network", network, "--out", configDir], { cwd: WORKFLOWS, stdio: ["ignore", "pipe", "pipe"] });
+  await activateSpec(addr("home", "kirchhoffRegistry"));
   // Seed the user on home and make every contract visible at the finalized pin.
   const home = byAlias("home");
   await send(home, await wallet(home, DEPLOYER).writeContract({ address: addr("home", "kETH"), abi: TOKEN_ABI, functionName: "mint", args: [user, parseEther("100")] }));
@@ -151,8 +168,32 @@ async function send(chain: LocalChain, hash: Hex): Promise<TransactionReceipt> {
   return receipt;
 }
 
+let configDir = "";
+/** `--config` resolves against the workflow folder, like `config-path` in workflow.yaml. */
+const configPath = (workflow: string): string => `../${configDir}/${workflow}/config.local.json`;
+
 function localConfig(workflow: string): unknown {
-  return JSON.parse(readFileSync(join(WORKFLOWS, workflow, "config.local.json"), "utf8"));
+  return JSON.parse(readFileSync(join(WORKFLOWS, configDir, workflow, "config.local.json"), "utf8"));
+}
+
+/**
+ * PRD section 6 spec lifecycle on the local registry: the issuer (the harness deployer, ISSUER_SAFE_ADDRESS of the
+ * local suite) proposes the compiled spec hash, the 600 s timelock is skipped with evm_increaseTime, and anyone
+ * activates it. W4 compares this active hash with the spec it runs.
+ */
+let lastActivation: TransactionReceipt | null = null;
+async function activateSpec(registry: Hex): Promise<void> {
+  const home = byAlias("home");
+  const specHash = w4ConfigSchema.parse(localConfig("w4-topology")).specHash;
+  const w = wallet(home, DEPLOYER);
+  await send(home, await w.writeContract({ address: registry, abi: REGISTRY_ABI, functionName: "proposeSpec", args: [TOKEN_ID, specHash, "ipfs://kirchhoff/specs/kETH.yaml"] }));
+  // Advance every chain's clock together: a home-only jump would skew the cross-chain timestamps W1 and W2 compare.
+  for (const c of chains) {
+    await anvil(c)("evm_increaseTime", [601]);
+    await anvil(c)("evm_mine", []);
+  }
+  lastActivation = await send(home, await w.writeContract({ address: registry, abi: REGISTRY_ABI, functionName: "activateSpec", args: [TOKEN_ID] }));
+  say(`spec ${specHash} proposed and activated on the local KirchhoffRegistry (tx ${lastActivation.transactionHash})`);
 }
 
 function eventIndex(receipt: TransactionReceipt, address: Hex, topic0: Hex): number {
@@ -208,7 +249,7 @@ async function runCre(label: string, args: SimulateArgs): Promise<SimulateResult
     say(`(compiled ${args.workflow} once with \`cre workflow build ./${args.workflow} --target ${args.target}\`; runs below pass --wasm ${binary})`);
     wasm.set(args.workflow, binary);
   }
-  const withWasm = { ...args, wasm: binary };
+  const withWasm = { ...args, wasm: binary, config: configPath(args.workflow) };
   say(`\n**${label}**\n\n\`\`\`\n$ cre ${simulateCommand(withWasm).join(" ")}`);
   const result = await simulate(WORKFLOWS, withWasm);
   for (const line of result.userLogs) say(line);
@@ -220,7 +261,7 @@ async function runCre(label: string, args: SimulateArgs): Promise<SimulateResult
   return result;
 }
 
-const runW2 = (label: string): Promise<SimulateResult> => runCre(`W2 ${label}`, { workflow: "w2-loop", target: "local", triggerIndex: 0, broadcast: true });
+const runW2 = (label: string): Promise<SimulateResult> => runCre(`W2 ${label}`, { workflow: "w2-loop", target: TARGET, triggerIndex: 0, broadcast: true });
 
 function w1Index(chain: Alias): number {
   const i = creditTriggerGroups(w1ConfigSchema.parse(localConfig("w1-junction"))).findIndex((g) => g.chain === byAlias(chain).name);
@@ -229,7 +270,7 @@ function w1Index(chain: Alias): number {
 }
 
 const runW1 = (label: string, chain: Alias, evm: { txHash: Hex; eventIndex: number }): Promise<SimulateResult> =>
-  runCre(`W1 ${label}`, { workflow: "w1-junction", target: "local", triggerIndex: w1Index(chain), evm, broadcast: true });
+  runCre(`W1 ${label}`, { workflow: "w1-junction", target: TARGET, triggerIndex: w1Index(chain), evm, broadcast: true });
 
 // ---------------------------------------------------------------- ledger assertions
 
@@ -331,7 +372,7 @@ const SCENARIOS: { n: number; title: string; run: (s: Suite) => Promise<void> }[
       const receipt = await home.public.getTransactionReceipt({ hash: last.transactionHash });
       const idx = eventIndex(receipt, ledger, last.topics[0]);
       await mineToFinality(chains);
-      const w3 = await runCre("W3 on BreachRecorded", { workflow: "w3-responder", target: "local", triggerIndex: 0, evm: { txHash: last.transactionHash, eventIndex: idx }, broadcast: true });
+      const w3 = await runCre("W3 on BreachRecorded", { workflow: "w3-responder", target: TARGET, triggerIndex: 0, evm: { txHash: last.transactionHash, eventIndex: idx }, broadcast: true });
       expectResult(w3, /quarantined on 3 chain\(s\)/, "W3 QUARANTINE_APPLIED on 3 chains");
       await expectLedgers(s.addr, Status.QUARANTINED, "every ledger QUARANTINED");
     },
@@ -369,6 +410,11 @@ const SCENARIOS: { n: number; title: string; run: (s: Suite) => Promise<void> }[
     n: 5,
     title: "Direct mint by a compromised minter key, no message: BROKEN by LOOP_DEFICIT",
     run: async (s) => {
+      if (lastActivation === null) throw new Error("no spec activation recorded");
+      const registry = w4ConfigSchema.parse(localConfig("w4-topology")).registry;
+      const activated = { txHash: lastActivation.transactionHash, eventIndex: eventIndex(lastActivation, registry.address, registry.specActivatedTopic0) };
+      const reload = await runCre("W4 on SpecActivated (reload the active spec)", { workflow: "w4-topology", target: TARGET, triggerIndex: 0, evm: activated, broadcast: true });
+      expectResult(reload, /findings=0 writes=0/, "W4 reloads the active spec: it equals the compiled spec, topology clean");
       const arb = byAlias("arb");
       const token = s.addr("arb", "remoteKETH");
       const grant = await send(arb, await wallet(arb, DEPLOYER).writeContract({ address: token, abi: TOKEN_ABI, functionName: "grantMintRole", args: [attacker] }));
@@ -377,7 +423,7 @@ const SCENARIOS: { n: number; title: string; run: (s: Suite) => Promise<void> }[
       const w4cfg = w4ConfigSchema.parse(localConfig("w4-topology"));
       const w4Index = 2 + watchedChains(w4cfg).findIndex((c) => c.name === arb.name);
       const roleGranted = eventIndex(grant, token, w4cfg.roleGrantedTopic0);
-      const w4 = await runCre("W4 on the RoleGranted(MINTER_ROLE) grant", { workflow: "w4-topology", target: "local", triggerIndex: w4Index, evm: { txHash: grant.transactionHash, eventIndex: roleGranted }, broadcast: true });
+      const w4 = await runCre("W4 on the RoleGranted(MINTER_ROLE) grant", { workflow: "w4-topology", target: TARGET, triggerIndex: w4Index, evm: { txHash: grant.transactionHash, eventIndex: roleGranted }, broadcast: true });
       expectResult(w4, /findings=1 writes=3/, "W4 flags the unlisted minter (EPOCH DRIFT SPEC_MISMATCH on 3 chains)");
       await expectLedgers(s.addr, Status.DRIFT, "every ledger DRIFT (SPEC_MISMATCH)");
       expectResult(await runW2("after the direct mint"), new RegExp(`status=${Status.BROKEN} reason=${Reason.LOOP_DEFICIT} delta=-${E("50")} writes=3`), "W2 BROKEN LOOP_DEFICIT, delta -50 kETH, BREACH on 3 chains");
@@ -394,6 +440,47 @@ const SCENARIOS: { n: number; title: string; run: (s: Suite) => Promise<void> }[
       await mineToFinality(chains);
       expectResult(await runW2("after a 3 kETH donation to the escrow"), new RegExp(`status=1 reason=0 delta=${E("3")} writes=3`), "W2 CONSERVED with delta +3 kETH");
       await expectLedgers(s.addr, Status.CONSERVED, "every ledger CONSERVED with delta +3 kETH (unclaimed surplus)", E("3"));
+    },
+  },
+  {
+    n: 7,
+    title: "Latency: Loop Rule breach to BROKEN onchain (PRD 2.M2, under 60 s after confidence)",
+    run: async (s) => {
+      const arb = byAlias("arb");
+      const token = s.addr("arb", "remoteKETH");
+      await send(arb, await wallet(arb, DEPLOYER).writeContract({ address: token, abi: TOKEN_ABI, functionName: "grantMintRole", args: [attacker] }));
+      // The breach: an unbacked mint. Anvil mines one block per second, so timestamps here are real time.
+      const mint = await send(arb, await wallet(arb, ATTACKER).writeContract({ address: token, abi: TOKEN_ABI, functionName: "mint", args: [attacker, E("50")] }));
+      const breachBlock = await arb.public.getBlock({ blockNumber: mint.blockNumber });
+      say(`breach: mint of 50 kETH on arb in block ${mint.blockNumber} at ${breachBlock.timestamp} (tx ${mint.transactionHash})`);
+      // Confidence: W2 pins `finalized` (Anvil: head - 64). Wait in real time for the mint block to get there.
+      let finalized = await arb.public.getBlock({ blockTag: "finalized" });
+      while (finalized.number < mint.blockNumber) {
+        await new Promise((r) => setTimeout(r, 500));
+        finalized = await arb.public.getBlock({ blockTag: "finalized" });
+      }
+      // The moment of confidence is the head that made the mint block final (finalized = head - 64 on Anvil).
+      const confident = await arb.public.getBlock({ blockTag: "latest" });
+      say(`confidence: arb head ${confident.number} at ${confident.timestamp} makes the mint block final (finalized head ${finalized.number})`);
+      // The supply-change log trigger (arb mint side) replays the mint's Transfer(from = 0).
+      const w2cfg = w2ConfigSchema.parse(localConfig("w2-loop"));
+      const side = w2cfg.supplyTriggers.findIndex((t) => t.chain === arb.name && t.side === "mint");
+      const transfer = eventIndex(mint, token, keccak256(toHex("Transfer(address,address,uint256)")));
+      const w2 = await runCre("W2 on the arb mint supply trigger", { workflow: "w2-loop", target: TARGET, triggerIndex: side + 1, evm: { txHash: mint.transactionHash, eventIndex: transfer }, broadcast: true });
+      expectResult(w2, new RegExp(`status=${Status.BROKEN} reason=${Reason.LOOP_DEFICIT}`), "W2 BROKEN LOOP_DEFICIT from the supply trigger");
+      await expectLedgers(s.addr, Status.BROKEN, "every ledger BROKEN");
+      const rows: string[] = [];
+      for (const c of chains) {
+        const events = await c.public.getContractEvents({ address: s.addr(c.alias, "conservationLedger"), abi: LEDGER_ABI, eventName: "BreachRecorded", fromBlock: 0n });
+        const last = events.at(-1);
+        if (last === undefined) throw new Error(`no BreachRecorded on ${c.alias}`);
+        const block = await c.public.getBlock({ blockNumber: last.blockNumber });
+        const fromBreach = block.timestamp - breachBlock.timestamp;
+        const fromConfidence = block.timestamp - confident.timestamp;
+        rows.push(`| ${c.alias} | ${last.transactionHash} | ${block.timestamp} | ${fromBreach} s | ${fromConfidence} s |`);
+        check(fromConfidence < 60n, `${c.alias}: BROKEN ${fromConfidence} s after confidence (< 60 s), ${fromBreach} s after the breach block`);
+      }
+      say(`\n| chain | BREACH tx | block time | breach -> BROKEN | confidence -> BROKEN |\n| --- | --- | --- | --- | --- |\n${rows.join("\n")}\n`);
     },
   },
 ];
@@ -423,6 +510,9 @@ for (const scenario of SCENARIOS) {
     say(`\n**Scenario ${scenario.n}: FAIL** ${error}`);
   }
 }
+
+// The suites live on the harness's private chains, which stop with this process: their records are dead.
+if (lastNetwork !== null) for (const c of chains) rmSync(join(REPO, "deployments", `${lastNetwork}-${c.alias}.json`), { force: true });
 
 const summary = ["| # | Scenario | Result |", "| --- | --- | --- |", ...results.map((r) => `| ${r.n} | ${r.title} | ${r.ok ? "PASS" : `FAIL: ${r.error ?? ""}`} |`)].join("\n");
 say(`\n### Summary\n\n${summary}`);

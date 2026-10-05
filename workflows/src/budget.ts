@@ -56,14 +56,15 @@ export class ReadBudget {
 }
 
 /**
- * The inclusive block range of the latest `CRE_LOG_QUERY_BLOCK_LIMIT` blocks ending at `head`,
- * clamped at genesis. `filterLogs` with this range never exceeds the CRE query limit.
+ * The inclusive block range of the latest `CRE_LOG_QUERY_BLOCK_LIMIT` blocks ending at `head`, clamped at block
+ * 1. `filterLogs` with this range never exceeds the CRE query limit. Block 0 is excluded: the CRE EVM capability
+ * rejects it ("block number 0 is not supported", seen on a fresh Anvil chain) and genesis emits no logs.
  */
 export function logWindow(head: bigint, blocks: bigint = CRE_LOG_QUERY_BLOCK_LIMIT): { fromBlock: bigint; toBlock: bigint } {
   if (blocks < 1n || blocks > CRE_LOG_QUERY_BLOCK_LIMIT) {
     throw new RangeError(`log window must span 1..${CRE_LOG_QUERY_BLOCK_LIMIT} blocks, got ${blocks}`);
   }
-  if (head < 0n) throw new RangeError(`head block must be non-negative, got ${head}`);
+  if (head < 1n) throw new RangeError(`head block must be at least 1, got ${head}`);
   const from = head - blocks + 1n;
-  return { fromBlock: from < 0n ? 0n : from, toBlock: head };
+  return { fromBlock: from < 1n ? 1n : from, toBlock: head };
 }

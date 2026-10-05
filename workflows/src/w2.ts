@@ -7,6 +7,7 @@ import {
   ReportType,
   Status,
   statusName,
+  toCanonical,
   trailingFlow,
   type Credit,
   type Debit,
@@ -19,7 +20,7 @@ import {
   type W2Config,
 } from "@kirchhoff/engine";
 import { decodeFunctionResult, encodeFunctionData, parseAbi, type Abi } from "viem";
-import { LEDGER_ABI } from "./abi.ts";
+import { AGGREGATOR_V3_ABI, LEDGER_ABI } from "./abi.ts";
 import { logWindow } from "./budget.ts";
 import { ledgerTargets, readBlock, type ChainEntry } from "./chains.ts";
 import type { BlockHeader, ChainIo, ChainLog } from "./io.ts";
@@ -233,8 +234,10 @@ export type LoopOutcome = {
  * (a credit delivered before its source debit reached the pin): at most 15 of the 15 allowed.
  */
 export function runLoop(io: ChainIo, config: W2Config, spec: TokenSpec, now: bigint): LoopOutcome {
-  if (config.model !== "lock_release_home") {
-    throw new Error(`W2 implements the lock_release_home Loop Rule; ${config.token} is ${config.model}`);
+  if (config.model === "burn_mint_multi" && config.porFeed === null) {
+    // No escrow and no reserve: with no issuer mint/burn adapter yet (PRD section 10, v1) there is no backing to
+    // compare against, so the epoch fails closed instead of reporting a vacuous CONSERVED.
+    throw new Error(`${config.token} is burn_mint_multi without a PoR feed; W2 has no backing source for it`);
   }
   const home = config.chains.find((c) => c.isHome);
   if (home === undefined) throw new Error("config has no home chain");
@@ -253,7 +256,7 @@ export function runLoop(io: ChainIo, config: W2Config, spec: TokenSpec, now: big
     const logs: ChainLog[] = [];
     for (let w = 0n; w < BigInt(W2_WINDOWS_PER_CHAIN); w++) {
       const end = pinned.number - w * windowBlocks;
-      if (end < 0n) break;
+      if (end < 1n) break;
       logs.push(...io.logs(chain.name, { addresses: filter.addresses, topics: [filter.topic0s], ...logWindow(end, windowBlocks) }));
     }
     const decoded = decodeBridgeLogs(config, spec, chain, logs);
@@ -278,6 +281,7 @@ export function runLoop(io: ChainIo, config: W2Config, spec: TokenSpec, now: big
   const supplyRead = uintViewAbi(config.reads.supply);
   const balanceRead = uintViewAbi(config.reads.balance);
   let escrow = 0n;
+  const reserve: { value: bigint | null } = { value: null };
   const consumed = new Set<string>();
   const observations: ChainObservation[] = heads.map(({ chain, pinned }) => {
     const reads: { call: Call; use: (data: Hex) => void }[] = [];
@@ -296,6 +300,19 @@ export function runLoop(io: ChainIo, config: W2Config, spec: TokenSpec, now: big
           call: { target: chain.token, callData: encodeFunctionData({ abi: balanceRead, functionName: functionName(config.reads.balance), args: [holder] }) },
           use: (data) => {
             escrow += uint(decodeFunctionResult({ abi: balanceRead, functionName: functionName(config.reads.balance), data }), "escrow balance");
+          },
+        });
+      }
+      // Step 4 (optional): the Proof of Reserve answer at the same pinned home block as every other read.
+      if (config.porFeed !== null) {
+        const feed = config.porFeed;
+        reads.push({
+          call: { target: feed, callData: encodeFunctionData({ abi: AGGREGATOR_V3_ABI, functionName: "latestRoundData" }) },
+          use: (data) => {
+            const [roundId, answer, , updatedAt] = decodeFunctionResult({ abi: AGGREGATOR_V3_ABI, functionName: "latestRoundData", data });
+            if (answer < 0n) throw new Error(`PoR feed ${feed} answered a negative reserve ${answer.toString()}`);
+            reserve.value = answer;
+            io.log(`PoR ${feed}: round ${roundId.toString()} answer ${answer.toString()} updatedAt ${updatedAt.toString()}`);
           },
         });
       }
@@ -367,18 +384,19 @@ export function runLoop(io: ChainIo, config: W2Config, spec: TokenSpec, now: big
   const latestId = observations.reduce((m, o) => (o.ledger.latestEpochId > m ? o.ledger.latestEpochId : m), 0n);
   // Ignored EPOCHs raise an unreadable high-water mark, so ids also follow the consensus clock.
   const epochId = latestId + 1n > now ? latestId + 1n : now;
+  const common = {
+    epochId,
+    pinned: pinnedBlocks,
+    supplies: observations.map((o) => ({ chain: BigInt(o.chain.selector), supply: o.supply })),
+    inFlightOut: match.inFlightOut,
+    inFlightIn: match.inFlightIn,
+    flowLastHour: trailingFlow(match.settledFlow, now),
+    priorDeficitEpochs,
+  };
   const result = loop(
-    {
-      model: "lock_release_home",
-      epochId,
-      pinned: pinnedBlocks,
-      supplies: observations.map((o) => ({ chain: BigInt(o.chain.selector), supply: o.supply })),
-      inFlightOut: match.inFlightOut,
-      inFlightIn: match.inFlightIn,
-      flowLastHour: trailingFlow(match.settledFlow, now),
-      priorDeficitEpochs,
-      escrow,
-    },
+    config.model === "lock_release_home"
+      ? { ...common, model: "lock_release_home", escrow }
+      : { ...common, model: "burn_mint_multi", issuanceNet: issuanceBound(spec, common), reserve: reserve.value },
     spec,
   );
   const hash = blocksHash(pinnedBlocks);
@@ -403,6 +421,21 @@ export function runLoop(io: ChainIo, config: W2Config, spec: TokenSpec, now: big
     if (plan.body !== null) writes.push(...writeToLedgers(io, [plan.target], config.tokenId, plan.body));
   }
   return { epochId, result, settled: match.settled, inFlightOut: match.inFlightOut, inFlightIn: match.inFlightIn, blocksHash: hash, plans, writes };
+}
+
+/**
+ * I_net for burn_mint_multi. The issuer mint/burn adapter that measures net authorized issuance is PRD v1 scope
+ * (section 10, `issuer_mint`), so W2 bounds issuance by the claims themselves (ΣS + F, canonical units). Δ then
+ * reduces to min(0, R - claims): the Proof of Reserve bound is enforced exactly, and an unbacked mint shows up as
+ * RESERVE_SHORTFALL once claims exceed the reserve.
+ */
+export function issuanceBound(
+  spec: TokenSpec,
+  s: { supplies: readonly { chain: bigint; supply: bigint }[]; inFlightOut: bigint; inFlightIn: bigint },
+): bigint {
+  let total = s.inFlightOut + s.inFlightIn;
+  for (const { chain, supply } of s.supplies) total += toCanonical(spec, chain, supply);
+  return total;
 }
 
 /**

@@ -7,6 +7,14 @@ local:
     config-path: "./config.local.json"
     secrets-path: "../secrets.yaml"
 
+scenarios:
+  user-workflow:
+    workflow-name: "kirchhoff-w3-responder"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./config.local.json"
+    secrets-path: "../secrets.yaml"
+
 staging:
   user-workflow:
     workflow-name: "kirchhoff-w3-responder"

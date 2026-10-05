@@ -92,7 +92,6 @@ export function writeToLedgers(
 
 const JUNCTION_EVIDENCE = stringToHex("KIRCHHOFF_JUNCTION_V1", { size: 32 });
 const LOOP_EVIDENCE = stringToHex("KIRCHHOFF_LOOP_V1", { size: 32 });
-const TOPOLOGY_EVIDENCE = stringToHex("KIRCHHOFF_TOPOLOGY_V1", { size: 32 });
 
 /**
  * Evidence for one offending credit. W1 and W2 compute it identically, so the same forged credit is one
@@ -131,16 +130,6 @@ export function loopEvidence(e: {
         { type: "uint16" },
       ],
       [LOOP_EVIDENCE, e.blocksHash, e.backing, e.claims, e.inFlightOut, e.inFlightIn, e.delta, e.reason],
-    ),
-  );
-}
-
-/** Evidence for a topology finding: which unlisted minters exist on which chain at which block. */
-export function topologyEvidence(e: { blocksHash: Hex; findings: readonly { chain: bigint; minter: Hex }[] }): Hex {
-  return keccak256(
-    encodeAbiParameters(
-      [{ type: "bytes32" }, { type: "bytes32" }, { type: "uint64[]" }, { type: "address[]" }],
-      [TOPOLOGY_EVIDENCE, e.blocksHash, e.findings.map((f) => f.chain), e.findings.map((f) => f.minter)],
     ),
   );
 }

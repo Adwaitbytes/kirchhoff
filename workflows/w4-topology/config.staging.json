@@ -2,7 +2,7 @@
   "workflow": "w4-topology",
   "token": "kETH",
   "tokenId": "0xe7cbc0ff4035309f71987d099a88ed33ef6bfd1a7d6c1050befb12561b95eb9c",
-  "specHash": "0xd90bfc9eb34c227fba9611291fb855ff63c1dd04518844f6ed9513b6ebdd8d67",
+  "specHash": "0x22c75309594e0a07596c003695911bb61b1618c9519c1e6d32175ab719915dfe",
   "schedule": "0 */10 * * * *",
   "registry": {
     "chain": "ethereum-testnet-sepolia",
@@ -15,7 +15,7 @@
     {
       "name": "ethereum-testnet-sepolia",
       "selector": "16015286601757825753",
-      "chainId": 31337,
+      "chainId": 11155111,
       "alias": "home",
       "isHome": true,
       "confidence": "finalized",
@@ -31,39 +31,39 @@
     {
       "name": "ethereum-testnet-sepolia-arbitrum-1",
       "selector": "3478487238524512106",
-      "chainId": 31338,
+      "chainId": 421614,
       "alias": "arb",
       "isHome": false,
       "confidence": "finalized",
       "triggerConfidence": "FINALIZED",
       "readConfidence": "finalized",
       "decimals": 18,
-      "token": "0x98Ec613f16CF077De8b34a7C32f4b767cc90840e",
-      "ledger": "0x05fE18C1cb1FF308aF668a7abaAf6Ac3f623B5D3",
-      "quarantine": "0xA3c539ccE9b4E6caCe97E8f4FD1346e1D885aC4a",
-      "feed": "0x93EEc1BA5a782ceB99e76Eec6736D900c1cB002d",
+      "token": "0x93EEc1BA5a782ceB99e76Eec6736D900c1cB002d",
+      "ledger": "0xe4908004644C0f52Ea56Ce747AAcc08B693A4aE0",
+      "quarantine": "0xFC052cdb453D3fB94770a88A4C1F03cB5CE84E2f",
+      "feed": "0xbf31A944Dc417a8BF1b167FE6362d2404FE06F96",
       "expectedMinters": [
-        "0xb270dcD4f512709DFAedBAab736888699BDa0273",
-        "0xa0506ECFC335b1418B88C58074Ad9B578CaFB50b"
+        "0x98Ec613f16CF077De8b34a7C32f4b767cc90840e",
+        "0x9bB3062C74C97768b83F48AC2F2bAe38A1dB5D78"
       ]
     },
     {
       "name": "ethereum-testnet-sepolia-base-1",
       "selector": "10344971235874465080",
-      "chainId": 31339,
+      "chainId": 84532,
       "alias": "base",
       "isHome": false,
       "confidence": "safe",
       "triggerConfidence": "SAFE",
       "readConfidence": "finalized",
       "decimals": 18,
-      "token": "0x98Ec613f16CF077De8b34a7C32f4b767cc90840e",
-      "ledger": "0x05fE18C1cb1FF308aF668a7abaAf6Ac3f623B5D3",
-      "quarantine": "0xA3c539ccE9b4E6caCe97E8f4FD1346e1D885aC4a",
-      "feed": "0x93EEc1BA5a782ceB99e76Eec6736D900c1cB002d",
+      "token": "0x93EEc1BA5a782ceB99e76Eec6736D900c1cB002d",
+      "ledger": "0xe4908004644C0f52Ea56Ce747AAcc08B693A4aE0",
+      "quarantine": "0xFC052cdb453D3fB94770a88A4C1F03cB5CE84E2f",
+      "feed": "0xbf31A944Dc417a8BF1b167FE6362d2404FE06F96",
       "expectedMinters": [
-        "0xb270dcD4f512709DFAedBAab736888699BDa0273",
-        "0xa0506ECFC335b1418B88C58074Ad9B578CaFB50b"
+        "0x98Ec613f16CF077De8b34a7C32f4b767cc90840e",
+        "0x9bB3062C74C97768b83F48AC2F2bAe38A1dB5D78"
       ]
     }
   ]

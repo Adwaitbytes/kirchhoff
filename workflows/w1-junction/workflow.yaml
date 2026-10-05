@@ -7,6 +7,14 @@ local:
     config-path: "./config.local.json"
     secrets-path: ""
 
+scenarios:
+  user-workflow:
+    workflow-name: "kirchhoff-w1-junction"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./config.local.json"
+    secrets-path: ""
+
 staging:
   user-workflow:
     workflow-name: "kirchhoff-w1-junction"

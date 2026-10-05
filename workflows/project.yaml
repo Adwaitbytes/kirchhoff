@@ -17,6 +17,18 @@ local:
     - chain-name: ethereum-testnet-sepolia-base-1
       url: http://127.0.0.1:8547
 
+# scenarios: three private Anvil chains (18545-18547, same chain ids and selectors as local) that
+#   scripts/scenarios.ts starts and stops itself, so the scripted scenarios never share chains, nonces, mined blocks
+#   or evm_increaseTime with demo/ runs on the shared local chains.
+scenarios:
+  rpcs:
+    - chain-name: ethereum-testnet-sepolia
+      url: http://127.0.0.1:18545
+    - chain-name: ethereum-testnet-sepolia-arbitrum-1
+      url: http://127.0.0.1:18546
+    - chain-name: ethereum-testnet-sepolia-base-1
+      url: http://127.0.0.1:18547
+
 staging:
   rpcs:
     - chain-name: ethereum-testnet-sepolia

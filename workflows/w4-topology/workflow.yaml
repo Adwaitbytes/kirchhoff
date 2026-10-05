@@ -5,7 +5,15 @@ local:
   workflow-artifacts:
     workflow-path: "./main.ts"
     config-path: "./config.local.json"
-    secrets-path: ""
+    secrets-path: "../secrets.yaml"
+
+scenarios:
+  user-workflow:
+    workflow-name: "kirchhoff-w4-topology"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./config.local.json"
+    secrets-path: "../secrets.yaml"
 
 staging:
   user-workflow:
@@ -13,4 +21,4 @@ staging:
   workflow-artifacts:
     workflow-path: "./main.ts"
     config-path: "./config.staging.json"
-    secrets-path: ""
+    secrets-path: "../secrets.yaml"

@@ -18,6 +18,7 @@
     "eslint.config.js"
   ],
   "exclude": [
-    "src/cre-io.ts"
+    "src/cre-io.ts",
+    "src/cre-notify.ts"
   ]
 }

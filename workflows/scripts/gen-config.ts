@@ -9,7 +9,8 @@
  *   - the per-chain records contracts/script/Deploy.s.sol writes (deployments/<network>-<chain>.json), assembled
  *     here into that shape (see `fromDeployRecords`).
  * Outputs: <workflow>/config.<target>.json for all four workflows and spec.resolved.<target>.json.
- * With no --target, both targets are generated when their deployments exist.
+ * With no --target, both targets are generated when their deployments exist. `--out <dir>` (relative to
+ * workflows/) writes the same files under another directory, for runs that must not touch the shared configs.
  */
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -57,7 +58,7 @@ async function generate(target: string, network: string): Promise<boolean> {
   }
   for (const [relative, content] of Object.entries(result.files)) {
     const out = relative === "spec.resolved.json" ? `spec.resolved.${target}.json` : relative;
-    const path = join(WORKFLOWS_DIR, out);
+    const path = join(WORKFLOWS_DIR, arg("out") ?? ".", out);
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, content);
     process.stdout.write(`wrote ${path}\n`);

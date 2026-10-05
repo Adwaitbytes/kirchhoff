@@ -19,4 +19,9 @@ export const ERC20_ABI = parseAbi([
   "function balanceOf(address account) view returns (uint256)",
 ]);
 
+/** Chainlink Proof of Reserve feed (contracts/src/interfaces/AggregatorV3Interface.sol). */
+export const AGGREGATOR_V3_ABI = parseAbi([
+  "function latestRoundData() view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)",
+]);
+
 export const ACCESS_CONTROL_ABI = parseAbi(["function hasRole(bytes32 role, address account) view returns (bool)"]);

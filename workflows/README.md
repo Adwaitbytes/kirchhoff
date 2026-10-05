@@ -9,7 +9,7 @@ under the INTERFACES.md Revision 2 constraints. Every verdict comes from `@kirch
 | `w1-junction` Junction Watch | one EVM log trigger per chain on its credit emitters (WeakBridge / HomeEscrowAdapter `Released`, CCIP OffRamp `ExecutionStateChanged`): 0 home, 1 arb, 2 base | `BREACH` to the ledger on every chain, in the same run, when a credit has no matching, unconsumed, confident debit |
 | `w2-loop` Loop Ledger | 0 cron `*/30 * * * * *`; then the compiler's `supplyTriggers` in order: 1-2 home escrow in/out, 3-4 arb mint/burn, 5-6 base mint/burn (`Transfer` with zero-address or escrow-holder topic filters) | `EPOCH` (CONSERVED/DRIFT, settled ids) or `BREACH` (LOOP_DEFICIT) to every chain, `RECOVERY_CHECK` where RECOVERING and the timelock ended |
 | `w3-responder` Responder | 0 `BreachRecorded` on the home ledger | `QUARANTINE_APPLIED` (incident id, tainted recipient) to every ledger whose active incident it is; Telegram/Slack pages with idempotency key = incident id |
-| `w4-topology` Topology Watch | 0 `SpecActivated` (home registry, this token), 1 cron `0 */10 * * * *`, 2 arb / 3 base `RoleGranted(MINTER_ROLE)` on the protected token | `EPOCH` DRIFT `SPEC_MISMATCH` when an account outside the spec holds the minter role |
+| `w4-topology` Topology Watch | 0 `SpecActivated` (home registry, this token), 1 cron `0 */10 * * * *`, 2 arb / 3 base `RoleGranted(MINTER_ROLE)` on the protected token, then CCIP TokenAdminRegistry `PoolSet(token)` per chain that has a registry (testnets: 4 home, 5 arb, 6 base; none on Anvil) | `EPOCH` DRIFT `SPEC_MISMATCH` when the registry's active spec is not the one the workflows run, an account outside the spec holds the minter role, the registered CCIP pool is not a spec pool, or a pool trusts a peer chain / pool outside the spec; pages the issuer (Telegram/Slack, idempotency key = drift key) |
 
 ## Layout
 
@@ -29,7 +29,8 @@ workflows/
     reports.ts multicall.ts abi.ts chains.ts
   scripts/
     gen-config.ts       runs the engine spec compiler
-    scenarios.ts        PRD section 17 "Workflows" layer: six scripted scenarios on Anvil
+    scenarios.ts        PRD section 17 "Workflows" layer: six scripted scenarios + the breach-to-BROKEN latency run
+    verify-ledgers.ts   reads report receipts and ledger state on the public testnets (provider 2 RPCs)
     lib/                deployments shape, local chain setup, cre runner
     sol/LocalOffRamp.sol  scenario-only CCIP OffRamp stand-in (local Anvil has no CCIP)
   test/                 vitest unit tests
@@ -45,7 +46,7 @@ pnpm --filter @kirchhoff/workflows gen-config --target local --network local
 pnpm --filter @kirchhoff/workflows test                               # vitest
 pnpm --filter @kirchhoff/workflows typecheck                          # node side + WASM side (tsconfig.wasm.json)
 pnpm --filter @kirchhoff/workflows lint
-pnpm --filter @kirchhoff/workflows scenarios                          # needs demo/anvil-up.sh running and `cre login`
+pnpm --filter @kirchhoff/workflows scenarios                          # starts its own Anvil chains (18545-18547); needs `cre login`
 
 cd workflows
 cre workflow simulate ./w2-loop --target local --non-interactive --trigger-index 0 --broadcast -e ../.env
@@ -84,7 +85,12 @@ fresh Anvil chain. The harness (`scripts/lib/local.ts installInfra`) therefore:
 Any other local deployment used with `--target local --broadcast` must be deployed the same way, or the ledger
 rejects the simulator's forwarder (`InvalidSender`). No `anvil --fork-url` was needed.
 
-Reads at `finalized` on Anvil mean `latest - 64`; the scenarios mine 70 blocks after each action.
+Reads at `finalized` on Anvil mean `latest - 64`; the scenarios mine 70 blocks after each action (except the
+latency run, which waits for finality in real time).
+
+The scenario harness does not use these shared chains: it starts three private Anvil chains on 18545-18547
+(target `scenarios` in `project.yaml`, same chain ids and selectors), compiles its configs into `.scn/<network>/`
+and passes them with `--config`, so demo/ runs on 8545-8547 and the shared `config.local.json` are never touched.
 
 ## Read budget per execution (CRE `ChainRead.CallLimit` = 15)
 
@@ -97,8 +103,8 @@ Every read goes through `ReadBudget`; a sixteenth read throws before it is made,
 | W1, CCIP credit | + 1 `getTransactionReceipt` for the credit, + OnRamp `filterLogs` and debit receipt | 9 |
 | W2 | 3 pin headers + 3 x 2 `filterLogs` windows ending at each pin + 3 Multicall3 at the pin (supply, ledger status/epoch/recovery, escrow + lockbox balances, consumed flags, `debitOf` for credits whose debit is older than the windows) | 12 observed, + up to 3 Multicall3 at latest for credits delivered before their debit reached the source pin = 15 |
 | W3 | 3 Multicall3 (status + active incident per ledger) | 3 |
-| W4, RoleGranted trigger | 3 Multicall3 (hasRole + ledger state) | 3 |
-| W4, cron / SpecActivated | 2 latest headers + 2 x 4 RoleGranted windows + 3 Multicall3 | 13 |
+| W4, RoleGranted / PoolSet trigger | 3 Multicall3 (ledger state, hasRole, TokenAdminRegistry.getPool, active spec hash) + up to 3 pool-peer Multicall3 (getSupportedChains, getRemotePools) | 3 local, 6 testnet |
+| W4, cron / SpecActivated | 2 latest headers + 2 x 3 RoleGranted windows + 3 + up to 3 Multicall3 | 11 local, 14 testnet (observed) |
 
 Other limits honored: `filterLogs` <= 100 blocks per query (`logWindow`), <= 5 addresses per log trigger and <= 10
 triggers per workflow (checked when wiring W1), cron >= 30 s, Multicall3 calldata <= 5 KB (checked in
@@ -141,7 +147,12 @@ triggers per workflow (checked when wiring W1), cron >= 30 s, Multicall3 calldat
 - A debit older than the W2 windows whose credit has not arrived is not counted in F: Δ then shows a surplus of
   that amount, never a false deficit. The windows (2 x 100 blocks per chain) cover one 30 s cron interval on all
   three testnets; a credit outside every window is never settled by W2, so W1's `isConsumed` check would not see it.
-- `burn_mint_multi` tokens are rejected by W2 (kETH is `lock_release_home`).
+- `burn_mint_multi` without a PoR feed is rejected by W2 (no backing source). With a PoR feed, W2 reads
+  `latestRoundData` at the pinned home block and bounds I_net by the claims (the issuer mint/burn adapter is PRD v1),
+  so it enforces the reserve bound (RESERVE_SHORTFALL) but not an issuance bound. kETH has no feed: the read is
+  skipped and the 12-read budget is unchanged (unit-tested).
+- W4 reads the CCIP TokenAdminRegistry address from a chain-id table (docs/research/ccip.md) and the notify secret
+  ids from W3's set, because the compiled W4 config does not carry them yet (ENGINE_REQUESTS.md R8).
 - W4's `SPEC_MISMATCH` DRIFT is overwritten by W2's next CONSERVED epoch; W4 re-raises it on every grant and cron
   run that still sees the grant. With the generated kETH spec, Base lists only the CCIP pool as minter while
   Deploy.s.sol also grants the Base WeakBridge, so a cron scan that reaches that grant flags it (correctly, per spec).

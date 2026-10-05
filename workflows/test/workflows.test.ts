@@ -17,8 +17,9 @@ import type { ChainLog } from "../src/io.ts";
 import { withBudget } from "../src/io.ts";
 import { creditTriggerGroups, runJunction } from "../src/w1.ts";
 import { runLoop, supplyTriggerFilters } from "../src/w2.ts";
-import { buildNotifications, decodeBreach, runResponder } from "../src/w3.ts";
-import { runTopology } from "../src/w4.ts";
+import { buildNotifications } from "../src/notify.ts";
+import { decodeBreach, incidentText, runResponder } from "../src/w3.ts";
+import { driftKey, runTopology } from "../src/w4.ts";
 import { ADDR, ARB, BASE, compiledConfigs, FakeChain, HOME, SEL, type Configs } from "./helpers.ts";
 
 const BRIDGE_EVENTS = parseAbi([
@@ -339,10 +340,10 @@ describe("W3 Responder", () => {
   it("decodes BreachRecorded and builds pages keyed by incident id, skipping channels with no secret", () => {
     const breach = decodeBreach(breachLog());
     const id = incidentId(c.w3.tokenId, evidence);
-    const none = buildNotifications("kETH", id, breach, { telegramBotToken: "", telegramChatId: "", slackWebhookUrl: "" });
+    const none = buildNotifications(incidentText("kETH", id, breach), id, { telegramBotToken: "", telegramChatId: "", slackWebhookUrl: "" });
     expect(none.requests).toEqual([]);
     expect(none.skipped).toEqual(["telegram", "slack"]);
-    const both = buildNotifications("kETH", id, breach, { telegramBotToken: "t", telegramChatId: "1", slackWebhookUrl: "https://hooks.example/x" });
+    const both = buildNotifications(incidentText("kETH", id, breach), id, { telegramBotToken: "t", telegramChatId: "1", slackWebhookUrl: "https://hooks.example/x" });
     expect(both.requests.map((r) => r.idempotencyKey)).toEqual([id, id]);
     expect(both.requests[0]?.body).toContain("DEBIT_NOT_FOUND");
   });
@@ -359,42 +360,223 @@ describe("W4 Topology Watch", () => {
     blockNumber: 300n,
     logIndex: 0,
   });
-  function setup(hasRole: boolean) {
+  const TOPO = parseAbi([
+    "function getPool(address) view returns (address)",
+    "function getSupportedChains() view returns (uint64[])",
+    "function getRemotePools(uint64) view returns (bytes[])",
+    "function activeSpecHash(bytes32) view returns (bytes32)",
+  ]);
+  const ROGUE: Hex = "0x00000000000000000000000000000000000000cc";
+
+  type World = {
+    hasRole?: boolean;
+    activeSpec?: Hex;
+    /** CCIP pools registered per chain (testnet chain ids only). */
+    pools?: Record<string, Hex>;
+    /** Remote pools a chain's pool trusts, per remote selector. */
+    peers?: Record<string, Record<string, Hex[]>>;
+    supported?: Record<string, bigint[]>;
+  };
+
+  /** kETH's W4 config with the public testnet chain ids, so the CCIP TokenAdminRegistry checks apply. */
+  const onTestnets = (): Configs["w4"] => ({
+    ...c.w4,
+    chains: c.w4.chains.map((ch) => ({ ...ch, chainId: ({ [HOME]: 11155111, [ARB]: 421614, [BASE]: 84532 } as Record<string, number>)[ch.name] ?? ch.chainId })),
+  });
+  const REGISTRY: Record<string, Hex> = {
+    [HOME]: "0x95F29FEE11c5C55d26cCcf1DB6772DE953B37B82",
+    [ARB]: "0x8126bE56454B628a88C17849B9ED99dd5a11Bd2f",
+    [BASE]: "0x736D0bBb318c1B27Ff686cd19804094E66250e17",
+  };
+
+  function setup(w: World) {
     const fake = new FakeChain();
     for (const chain of [HOME, ARB, BASE]) fake.setHead(chain, 500n, 600n);
     serveLedger(fake, HOME, ADDR.home.ledger, ledgerState());
     serveLedger(fake, ARB, ADDR.arb.ledger, ledgerState());
     serveLedger(fake, BASE, ADDR.base.ledger, ledgerState(Status.UNKNOWN));
-    fake.on(ARB, (to, data) =>
-      to.toLowerCase() === ADDR.arb.token && selectorOf(data) === toFunctionSelector("hasRole(bytes32,address)")
-        ? encodeFunctionResult({ abi: ACCESS_CONTROL_ABI, functionName: "hasRole", result: hasRole })
+    fake.on(HOME, (to) =>
+      to.toLowerCase() === ADDR.home.registry
+        ? encodeFunctionResult({ abi: TOPO, functionName: "activeSpecHash", result: w.activeSpec ?? c.w4.specHash })
         : undefined,
     );
+    fake.on(ARB, (to, data) =>
+      to.toLowerCase() === ADDR.arb.token && selectorOf(data) === toFunctionSelector("hasRole(bytes32,address)")
+        ? encodeFunctionResult({ abi: ACCESS_CONTROL_ABI, functionName: "hasRole", result: w.hasRole ?? true })
+        : undefined,
+    );
+    const pools: Partial<Record<string, Hex>> = w.pools ?? {};
+    for (const chain of [HOME, ARB, BASE]) {
+      fake.on(chain, (to, data) => {
+        if (to.toLowerCase() === REGISTRY[chain]?.toLowerCase()) {
+          return encodeFunctionResult({ abi: TOPO, functionName: "getPool", result: pools[chain] ?? "0x0000000000000000000000000000000000000000" });
+        }
+        if (to.toLowerCase() !== pools[chain]?.toLowerCase()) return undefined;
+        const call = decodeFunctionData({ abi: TOPO, data });
+        if (call.functionName === "getSupportedChains") {
+          return encodeFunctionResult({ abi: TOPO, functionName: "getSupportedChains", result: w.supported?.[chain] ?? [HOME, ARB, BASE].filter((x) => x !== chain).map((x) => SEL[x as keyof typeof SEL]) });
+        }
+        if (call.functionName === "getRemotePools") {
+          const remote = [HOME, ARB, BASE].find((x) => SEL[x as keyof typeof SEL] === call.args[0]) ?? "";
+          const peer = pools[remote];
+          const list = w.peers?.[chain]?.[remote] ?? (peer === undefined ? [] : [peer]);
+          return encodeFunctionResult({ abi: TOPO, functionName: "getRemotePools", result: list.map((p) => pad(p, { size: 32 })) });
+        }
+        return undefined;
+      });
+    }
     return fake;
   }
+  const spec = (log: ChainLog = grantLog(ATTACKER)) => ({ kind: "spec" as const, log });
+  const grant = (account: Hex) => ({ kind: "grant" as const, chain: ARB, log: grantLog(account) });
+  const consistentPools = { [HOME]: ADDR.home.pool, [ARB]: ADDR.arb.pool, [BASE]: ADDR.base.pool };
 
-  it("raises EPOCH DRIFT SPEC_MISMATCH for a minter outside the spec (not on an UNKNOWN ledger)", () => {
-    const fake = setup(true);
-    const out = runTopology(fake, c.w4, MULTICALL3, { chain: ARB, log: grantLog(ATTACKER) }, 2_000n);
-    expect(out.findings.map((f) => f.minter)).toEqual([ATTACKER]);
+  it("raises EPOCH DRIFT SPEC_MISMATCH for a minter outside the spec, with a page keyed by the drift", () => {
+    const fake = setup({});
+    const budget = new ReadBudget();
+    const out = runTopology(withBudget(fake, budget), c.w4, MULTICALL3, grant(ATTACKER), 2_000n);
+    expect(out.findings.map((f) => f.kind === "minter" && f.account)).toEqual([ATTACKER]);
     const writes = decodedWrites(fake);
     expect(writes.map((w) => w.chain)).toEqual([HOME, ARB]);
     const r = writes[0]?.report;
     expect(r?.reportType === ReportType.EPOCH && [r.payload.status, r.payload.reason]).toEqual([Status.DRIFT, Reason.SPEC_MISMATCH]);
     expect(r?.reportType === ReportType.EPOCH && r.payload.epochId).toBe(2_000n);
+    expect(out.text).toContain(ATTACKER);
+    expect(out.driftKey).toBe(driftKey(c.w4.tokenId, out.findings));
+    expect(budget.used).toBe(3);
   });
 
   it("ignores a grant to a spec minter and a grant that was already revoked", () => {
-    expect(runTopology(setup(true), c.w4, MULTICALL3, { chain: ARB, log: grantLog(ADDR.arb.bridge) }, 1n).findings).toEqual([]);
-    expect(runTopology(setup(false), c.w4, MULTICALL3, { chain: ARB, log: grantLog(ATTACKER) }, 1n).findings).toEqual([]);
+    expect(runTopology(setup({}), c.w4, MULTICALL3, grant(ADDR.arb.bridge), 1n).findings).toEqual([]);
+    expect(runTopology(setup({ hasRole: false }), c.w4, MULTICALL3, grant(ATTACKER), 1n).findings).toEqual([]);
+  });
+
+  it("reloads the active spec: a registry hash different from the running spec is SPEC_MISMATCH, an equal one is clean", () => {
+    const other: Hex = `0x${"ab".repeat(32)}`;
+    const stale = runTopology(setup({ activeSpec: other }), c.w4, MULTICALL3, spec(), 1n);
+    expect(stale.findings.map((f) => f.kind)).toEqual(["spec"]);
+    expect(stale.text).toContain(other);
+    const none = runTopology(setup({ activeSpec: `0x${"0".repeat(64)}` }), c.w4, MULTICALL3, spec(), 1n);
+    expect(none.findings.map((f) => f.kind)).toEqual(["spec"]);
+    expect(runTopology(setup({}), c.w4, MULTICALL3, spec(), 1n).findings).toEqual([]);
   });
 
   it("scans RoleGranted windows on every remote within the read budget on the cron path", () => {
-    const fake = setup(true);
+    const fake = setup({});
     fake.logsByChain.set(ARB, [{ ...grantLog(ATTACKER), blockNumber: 590n }]);
     const budget = new ReadBudget();
-    const out = runTopology(withBudget(fake, budget), c.w4, MULTICALL3, null, 2_000n);
+    const out = runTopology(withBudget(fake, budget), c.w4, MULTICALL3, { kind: "scan" }, 2_000n);
     expect(out.findings).toHaveLength(1);
-    expect(budget.used).toBe(2 + 2 * 4 + 3);
+    expect(budget.used).toBe(2 + 2 * 3 + 3);
+  });
+
+  it("checks the CCIP pool and its peers from current state; all consistent is clean at 14 reads", () => {
+    const budget = new ReadBudget();
+    const out = runTopology(withBudget(setup({ pools: consistentPools }), budget), onTestnets(), MULTICALL3, { kind: "scan" }, 1n);
+    expect(out.findings).toEqual([]);
+    expect(budget.used).toBe(2 + 2 * 3 + 3 + 3);
+  });
+
+  it("flags a registry pool that is not a spec minter, a rogue peer pool and a peer chain outside the spec", () => {
+    const swapped = runTopology(setup({ pools: { ...consistentPools, [ARB]: ROGUE } }), onTestnets(), MULTICALL3, { kind: "pool", chain: ARB, log: grantLog(ROGUE) }, 1n);
+    expect(swapped.findings.some((f) => f.kind === "pool" && f.pool === ROGUE)).toBe(true);
+
+    const peer = runTopology(setup({ pools: consistentPools, peers: { [HOME]: { [BASE]: [ADDR.base.pool, ROGUE] } } }), onTestnets(), MULTICALL3, { kind: "scan" }, 1n);
+    expect(peer.findings.map((f) => f.kind === "peer" && f.detail)).toEqual([expect.stringContaining(ROGUE)]);
+
+    const chain = runTopology(setup({ pools: consistentPools, supported: { [BASE]: [SEL[HOME], 4949039107694359620n] } }), onTestnets(), MULTICALL3, { kind: "scan" }, 1n);
+    expect(chain.findings.map((f) => f.kind === "peer" && f.detail)).toEqual([expect.stringContaining("4949039107694359620")]);
+  });
+
+  it("derives one drift key for the same findings regardless of order", () => {
+    const out = runTopology(setup({ activeSpec: `0x${"ab".repeat(32)}` }), c.w4, MULTICALL3, grant(ATTACKER), 1n);
+    expect(out.findings).toHaveLength(2);
+    expect(driftKey(c.w4.tokenId, [...out.findings].reverse())).toBe(out.driftKey);
+  });
+});
+
+// ------------------------------------------------------------------ W2 Proof of Reserve
+
+describe("W2 Proof of Reserve (PRD section 8 W2 step 4)", () => {
+  const FEED: Hex = "0x00000000000000000000000000000000000f33d0";
+  const AGG = parseAbi(["function latestRoundData() view returns (uint80, int256, uint256, uint256, uint80)"]);
+
+  /** kETH's chains as a reserve-backed burn-and-mint token whose PoR feed (8 decimals) lives on home. */
+  function backedConfig(porFeed: Hex | null): Configs["w2"] {
+    return {
+      ...c.w2,
+      model: "burn_mint_multi",
+      porFeed,
+      reserveDecimals: 8,
+      escrowHolders: [],
+      spec: { ...c.w2.spec, model: "burn_mint_multi", reserves: { porFeed, decimals: 8 } },
+    };
+  }
+
+  function setup(supplies: Record<string, bigint>, answer: bigint | null) {
+    const fake = new FakeChain();
+    const feedCalls: bigint[] = [];
+    for (const chain of [HOME, ARB, BASE]) fake.setHead(chain, 500n, 600n);
+    const tokens: Record<string, Hex> = { [HOME]: ADDR.home.token, [ARB]: ADDR.arb.token, [BASE]: ADDR.base.token };
+    for (const [chain, token] of Object.entries(tokens)) {
+      fake.on(chain, (to, data) => {
+        if (to.toLowerCase() !== token.toLowerCase()) return undefined;
+        return decodeFunctionData({ abi: ERC20_ABI, data }).functionName === "totalSupply"
+          ? encodeFunctionResult({ abi: ERC20_ABI, functionName: "totalSupply", result: supplies[chain] ?? 0n })
+          : encodeFunctionResult({ abi: ERC20_ABI, functionName: "balanceOf", result: 0n });
+      });
+    }
+    serveLedger(fake, HOME, ADDR.home.ledger, ledgerState());
+    serveLedger(fake, ARB, ADDR.arb.ledger, ledgerState());
+    serveLedger(fake, BASE, ADDR.base.ledger, ledgerState());
+    fake.on(HOME, (to, _data, block) => {
+      if (to.toLowerCase() !== FEED) return undefined;
+      if (block.tag === "number") feedCalls.push(block.number);
+      if (answer === null) throw new Error("feed has no code");
+      return encodeFunctionResult({ abi: AGG, functionName: "latestRoundData", result: [7n, answer, 1n, 1n, 7n] });
+    });
+    return { fake, feedCalls };
+  }
+
+  it("skips the PoR read cleanly when the spec has no feed (kETH): 12 reads, no feed call", () => {
+    expect(c.w2.porFeed).toBeNull();
+    const { fake, feedCalls } = setup({ [HOME]: 100n * ONE }, null);
+    const budget = new ReadBudget();
+    const out = runLoop(withBudget(fake, budget), c.w2, reviveSpec(c.w2.spec), 2_000_000_000n);
+    expect(out.result.status).toBe(Status.CONSERVED);
+    expect(out.result.delta).toBe(0n);
+    expect(feedCalls).toEqual([]);
+    expect(budget.used).toBe(12);
+  });
+
+  it("reads latestRoundData at the pinned home block and stays CONSERVED while the reserve covers every claim", () => {
+    const config = backedConfig(FEED);
+    // 60 + 30 + 10 = 100 tokens claimed; reserve 100.00000000 (8 decimals) rescales to exactly 100e18.
+    const { fake, feedCalls } = setup({ [HOME]: 60n * ONE, [ARB]: 30n * ONE, [BASE]: 10n * ONE }, 100n * 10n ** 8n);
+    const budget = new ReadBudget();
+    const out = runLoop(withBudget(fake, budget), config, reviveSpec(config.spec), 2_000_000_000n);
+    expect(feedCalls).toEqual([500n]);
+    expect(out.result.status).toBe(Status.CONSERVED);
+    expect(out.result.delta).toBe(0n);
+    expect(budget.used).toBe(12);
+  });
+
+  it("breaks with RESERVE_SHORTFALL when claims exceed the reserve", () => {
+    const config = backedConfig(FEED);
+    const { fake } = setup({ [HOME]: 60n * ONE, [ARB]: 45n * ONE, [BASE]: 10n * ONE }, 100n * 10n ** 8n);
+    const out = runLoop(fake, config, reviveSpec(config.spec), 2_000_000_000n);
+    expect(out.result.status).toBe(Status.BROKEN);
+    expect(out.result.reason).toBe(Reason.RESERVE_SHORTFALL);
+    expect(out.result.delta).toBe(-15n * ONE);
+    const first = decodedWrites(fake)[0]?.report;
+    expect(first?.reportType === ReportType.BREACH && first.payload.amount).toBe(15n * ONE);
+  });
+
+  it("fails closed on a negative reserve answer and on a burn-and-mint token with no feed", () => {
+    const config = backedConfig(FEED);
+    const { fake } = setup({ [HOME]: ONE }, -1n);
+    expect(() => runLoop(fake, config, reviveSpec(config.spec), 2_000_000_000n)).toThrow(/negative reserve/);
+    const none = backedConfig(null);
+    expect(() => runLoop(setup({}, null).fake, none, reviveSpec(none.spec), 1n)).toThrow(/without a PoR feed/);
   });
 });

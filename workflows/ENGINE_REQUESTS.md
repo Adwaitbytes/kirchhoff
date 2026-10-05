@@ -69,3 +69,15 @@ does not. W2 needs it to match credits whose debit is older than its log windows
 R1 (resolved spec in W1/W2 configs + `reviveSpec`), R3 (supply trigger topic filters) and R6 (`registry` on
 W2 debit watches) were delivered by the engine; the workflows now use them directly (`reviveSpec(config.spec)`,
 `config.supplyTriggers`, `debitEvents[].registry`) and the interim fallbacks were removed. All requests are closed.
+
+## R8. W4 needs the spec, the CCIP TokenAdminRegistry and the notify secrets (OPEN, 2026-10-06)
+
+PRD_TRACEABILITY 8.W4.1-8.W4.3: W4 must (a) compare `KirchhoffRegistry.activeSpec(tokenId).specHash` with the spec it
+runs, (b) check the token's CCIP pool and pool peers against the spec, and (c) page the issuer when it raises DRIFT.
+Ask, all additive to `W4Config`:
+- `spec: SpecJson` (as in W1/W2), so W4 knows the spec pools per chain and revives it with `reviveSpec`;
+- `chains[].tokenAdminRegistry: Hex | null` from a new optional `ChainDeployment.ccip.tokenAdminRegistry`
+  (public testnets: docs/research/ccip.md section 1; null on Anvil, where Deploy.s.sol has none);
+- `notifySecrets: string[]` exactly as in `W3Config` (from `response.on_broken` containing `page_issuer`).
+`workflows/scripts/lib/deployments.ts` will fill `ccip.tokenAdminRegistry` from the Deploy.s.sol record
+(`ccipTokenAdminRegistry`, zero address -> omitted).

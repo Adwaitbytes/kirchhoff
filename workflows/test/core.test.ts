@@ -41,7 +41,8 @@ describe("ReadBudget", () => {
 describe("logWindow", () => {
   it("spans the latest 100 blocks inclusive and clamps at genesis", () => {
     expect(logWindow(1000n)).toEqual({ fromBlock: 901n, toBlock: 1000n });
-    expect(logWindow(5n)).toEqual({ fromBlock: 0n, toBlock: 5n });
+    expect(logWindow(5n)).toEqual({ fromBlock: 1n, toBlock: 5n });
+    expect(() => logWindow(0n)).toThrow(RangeError);
     expect(() => logWindow(10n, 101n)).toThrow(RangeError);
   });
 });

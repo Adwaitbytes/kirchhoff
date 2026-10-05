@@ -1,5 +1,5 @@
 {
-  "specHash": "0xd90bfc9eb34c227fba9611291fb855ff63c1dd04518844f6ed9513b6ebdd8d67",
+  "specHash": "0x22c75309594e0a07596c003695911bb61b1618c9519c1e6d32175ab719915dfe",
   "spec": {
     "specVersion": 1,
     "token": "kETH",
@@ -23,7 +23,7 @@
           "selector": "3478487238524512106",
           "alias": "arb"
         },
-        "token": "0x98Ec613f16CF077De8b34a7C32f4b767cc90840e",
+        "token": "0x93EEc1BA5a782ceB99e76Eec6736D900c1cB002d",
         "minters": [
           "ccip_pool_arb",
           "weakbridge_arb"
@@ -36,7 +36,7 @@
           "selector": "10344971235874465080",
           "alias": "base"
         },
-        "token": "0x98Ec613f16CF077De8b34a7C32f4b767cc90840e",
+        "token": "0x93EEc1BA5a782ceB99e76Eec6736D900c1cB002d",
         "minters": [
           "ccip_pool_base",
           "weakbridge_base"
@@ -52,18 +52,18 @@
         "kind": "ccip_v2",
         "pools": {
           "home": "0x1c60f8B189E6Ea5F04C9510fAef5021605a22BDe",
-          "arb": "0xb270dcD4f512709DFAedBAab736888699BDa0273",
-          "base": "0xb270dcD4f512709DFAedBAab736888699BDa0273"
+          "arb": "0x98Ec613f16CF077De8b34a7C32f4b767cc90840e",
+          "base": "0x98Ec613f16CF077De8b34a7C32f4b767cc90840e"
         },
         "onramps": {
-          "home": "0xe4908004644C0f52Ea56Ce747AAcc08B693A4aE0",
-          "arb": "0xe4908004644C0f52Ea56Ce747AAcc08B693A4aE0",
-          "base": "0xe4908004644C0f52Ea56Ce747AAcc08B693A4aE0"
+          "home": "0x8dcf17f298c881A547D91ca4aA3C2AD7568C6777",
+          "arb": "0x6B9a7cF69F90Ae2659bfe3069fba5Aa308A48cC4",
+          "base": "0xA33b221A8427739c76f631a995ca60544bEdD632"
         },
         "offramps": {
-          "home": "0xe4908004644C0f52Ea56Ce747AAcc08B693A4aE0",
-          "arb": "0xe4908004644C0f52Ea56Ce747AAcc08B693A4aE0",
-          "base": "0xe4908004644C0f52Ea56Ce747AAcc08B693A4aE0"
+          "home": "0xc6A246A9AcdAaE651708706494720F79C3E5d0A1",
+          "arb": "0xC93218EB7B778bC0c13E5296140C8E4Fa1C440DA",
+          "base": "0xa137536A3BFd81aD6f090981268b8C2818451d41"
         },
         "lockbox": "0x8fa18a722eED4ef8C40C2552b92Db07ccdD6f899"
       },
@@ -74,8 +74,8 @@
         "kind": "custom",
         "contracts": {
           "home": "0xdE9A6413AC2C29Cd6621f93FCD872eBB46b6a3D7",
-          "arb": "0xa0506ECFC335b1418B88C58074Ad9B578CaFB50b",
-          "base": "0xa0506ECFC335b1418B88C58074Ad9B578CaFB50b"
+          "arb": "0x9bB3062C74C97768b83F48AC2F2bAe38A1dB5D78",
+          "base": "0x9bB3062C74C97768b83F48AC2F2bAe38A1dB5D78"
         },
         "events": {
           "debitEvent": "Burned(bytes32 indexed id, address indexed from, address to, uint256 amount, uint64 dstChain)",

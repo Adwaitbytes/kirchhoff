@@ -41,7 +41,7 @@ export default tseslint.config(
   {
     languageOptions: {
       parserOptions: {
-        projectService: { allowDefaultProject: ["src/cre-io.ts"] },
+        projectService: { allowDefaultProject: ["src/cre-io.ts", "src/cre-notify.ts"] },
         tsconfigRootDir: import.meta.dirname,
       },
     },

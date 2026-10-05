@@ -5,13 +5,15 @@ import type { Hex } from "@kirchhoff/engine";
 
 export type SimulateArgs = {
   workflow: "w1-junction" | "w2-loop" | "w3-responder" | "w4-topology";
-  target: "local" | "staging";
+  target: "local" | "scenarios" | "staging";
   triggerIndex: number;
   /** EVM log trigger replay: transaction hash and 0-based index of the log in that transaction's receipt. */
   evm?: { txHash: Hex; eventIndex: number };
   broadcast: boolean;
   /** Pre-built WASM (absolute path, from `cre workflow build`): skips the ~10 s compile per run. */
   wasm?: string;
+  /** Config file override (`--config`), relative to the workflow folder; the CLI caps the path at 97 characters. */
+  config?: string;
 };
 
 export type SimulateResult = {
@@ -30,6 +32,7 @@ export function simulateCommand(a: SimulateArgs): string[] {
   if (a.evm !== undefined) args.push("--evm-tx-hash", a.evm.txHash, "--evm-event-index", String(a.evm.eventIndex));
   if (a.broadcast) args.push("--broadcast");
   if (a.wasm !== undefined) args.push("--wasm", a.wasm);
+  if (a.config !== undefined) args.push("--config", a.config);
   args.push("-e", "../.env");
   return args;
 }

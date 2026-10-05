@@ -1,4 +1,4 @@
-import { execFile, execFileSync } from "node:child_process";
+import { execFile, execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -33,7 +33,7 @@ export type LocalChain = {
   public: PublicClient<Transport, Chain>;
 };
 
-const PORTS: Readonly<Record<Alias, number>> = { home: 8545, arb: 8546, base: 8547 };
+const OFFSET: Readonly<Record<Alias, number>> = { home: 0, arb: 1, base: 2 };
 const SIMULATOR_FORWARDERS: Readonly<Record<Alias, Hex>> = {
   home: "0x15fC6ae953E024d975e77382eEeC56A9101f9F88",
   arb: "0xd41263567ddfead91504199b8c6c87371e83ca5d",
@@ -41,11 +41,12 @@ const SIMULATOR_FORWARDERS: Readonly<Record<Alias, Hex>> = {
 };
 export const MULTICALL3: Hex = "0xcA11bde05977b3631167028862bE2a173976CA11";
 
-export function localChains(): LocalChain[] {
+/** The three local chains; `basePort` 8545 is demo/anvil-up.sh, 18545 the harness's private chains. */
+export function localChains(basePort = 8545): LocalChain[] {
   return (["home", "arb", "base"] as const).map((alias) => {
     const known = KNOWN_CHAINS.find((c) => c.defaultAlias === alias);
     if (known === undefined) throw new Error(`no known chain for ${alias}`);
-    const rpc = `http://127.0.0.1:${PORTS[alias]}`;
+    const rpc = `http://127.0.0.1:${(basePort + OFFSET[alias]).toString()}`;
     const chain = defineChain({
       id: known.localChainId,
       name: `anvil-${alias}`,
@@ -63,6 +64,32 @@ export function localChains(): LocalChain[] {
       public: createPublicClient({ chain, transport: http(rpc) }),
     };
   });
+}
+
+/**
+ * Starts fresh Anvil chains on basePort..basePort+2 with the local chain ids and 1 s blocks (so block timestamps
+ * are real time, which the latency scenario measures). Fails if a port is already taken: the harness never reuses
+ * chains it did not start.
+ */
+export async function startAnvils(basePort: number, repo: string): Promise<ChildProcess[]> {
+  const procs = localChains(basePort).map((c) =>
+    spawn("anvil", ["--port", String(basePort + OFFSET[c.alias]), "--chain-id", String(c.chainId), "--block-time", "1", "--silent"], {
+      cwd: repo,
+      stdio: "ignore",
+    }),
+  );
+  for (const c of localChains(basePort)) {
+    for (let i = 0; ; i++) {
+      try {
+        await c.public.getChainId();
+        break;
+      } catch (e) {
+        if (i > 100) throw new Error(`anvil on ${c.rpc} did not start`, { cause: e });
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+  }
+  return procs;
 }
 
 export function wallet(chain: LocalChain, key: Hex): WalletClient<Transport, Chain, Account> {
