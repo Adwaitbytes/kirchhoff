@@ -7,6 +7,20 @@ on:
 jobs:
   typescript:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: kirchhoff
+          POSTGRES_PASSWORD: kirchhoff
+          POSTGRES_DB: kirchhoff
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U kirchhoff"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -21,6 +35,13 @@ jobs:
         run: npm ci && forge build
       - name: No AI in the veto path (PRD section 11)
         run: bash scripts/no-ai-in-veto-path.sh
+      - name: Create the integration test databases
+        env:
+          PGPASSWORD: kirchhoff
+        run: |
+          for db in kirchhoff_test kirchhoff_idx_unit_test kirchhoff_api_test kirchhoff_mcp_test; do
+            psql -h 127.0.0.1 -p 5434 -U kirchhoff -d kirchhoff -c "CREATE DATABASE $db"
+          done
       - run: pnpm -r lint
       - run: pnpm -r typecheck
       - run: pnpm -r --workspace-concurrency=2 test
