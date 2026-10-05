@@ -21,3 +21,5 @@ deployments/local*
 deployments/wfs*
 contracts/broadcast/
 api/.vercel-stage/
+.env*
+media/video/
