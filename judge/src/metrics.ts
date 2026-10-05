@@ -1,4 +1,5 @@
 import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from "prom-client";
+import type { SinkMetrics } from "./sink.ts";
 
 export type JudgeMetrics = {
   registry: Registry;
@@ -7,6 +8,7 @@ export type JudgeMetrics = {
   authFailures: Counter<"failure">;
   invalidRequests: Counter;
   specSynced: Gauge<"token">;
+  sink: SinkMetrics;
 };
 
 export function createMetrics(): JudgeMetrics {
@@ -45,5 +47,16 @@ export function createMetrics(): JudgeMetrics {
       registers: [registry],
     }),
     specSynced,
+    sink: {
+      sent: new Counter({ name: "judge_verdict_sink_sent_total", help: "Verdict reports accepted by the API", registers: [registry] }),
+      dropped: new Counter({
+        name: "judge_verdict_sink_dropped_total",
+        help: "Verdict reports dropped: overflow (queue full while the API was down) or rejected (API 4xx)",
+        labelNames: ["reason"] as const,
+        registers: [registry],
+      }),
+      failures: new Counter({ name: "judge_verdict_sink_failures_total", help: "Sink flushes that failed and were requeued", registers: [registry] }),
+      queued: new Gauge({ name: "judge_verdict_sink_queued", help: "Verdict reports waiting to be sent", registers: [registry] }),
+    },
   };
 }

@@ -58,6 +58,11 @@ Verified behaviour:
 
 ## Judge in the cell
 
+**Update 2026-10-05:** the cell's Judge now runs on `deployments/testnet.json` with the testnet `RPC_*_1/_2` from
+`judge-env` (Anvil overrides removed): `/readyz` 200, registry synced through both providers, `"auth":"hmac"`. kETH
+has no active spec in the testnet registry yet, so kETH messages FAIL `UNKNOWN_TOKEN` until the Safe activates
+`0x22c75309...5dfe` (judge/README.md "Live testnet check"). The Anvil wiring below is historical.
+
 The Judge Deployment runs in the cell and the policy hook is authenticated end to end (`JUDGE_AUTH=hmac`):
 
 ```

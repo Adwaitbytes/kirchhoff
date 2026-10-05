@@ -52,6 +52,11 @@ spec:
               value: /etc/judge/spec.yaml
             - name: JUDGE_DEPLOYMENTS_PATH
               value: /etc/judge/deployments.json
+            # Fire-and-forget verdict reports to the API read model (POST /internal/verdicts). Off unless Secret
+            # judge-env carries VERDICT_SINK_URL (rendered from .env by up.sh); the key is INTERNAL_INGEST_KEY,
+            # falling back to JUDGE_HMAC_SECRET, as on the API. Never in the decision path.
+            - name: JUDGE_CELL_ID
+              value: kirchhoff-cell-1
           envFrom:
             - secretRef:
                 name: judge-env

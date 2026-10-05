@@ -8,6 +8,7 @@ import { createMetrics } from "./metrics.ts";
 import { createProviders, type ChainProviders } from "./rpc.ts";
 import { compileValidators } from "./schema.ts";
 import { createJudgeServer } from "./server.ts";
+import { VerdictSink } from "./sink.ts";
 import { SpecCache, SpecLoadError, loadTokens } from "./spec-cache.ts";
 
 async function main(): Promise<void> {
@@ -42,6 +43,11 @@ async function main(): Promise<void> {
   await cache.syncOnce();
   cache.start();
 
+  const metrics = createMetrics();
+  const sinkConfig = config.verdictSink;
+  const sink =
+    sinkConfig === null ? undefined : new VerdictSink({ url: sinkConfig.url, key: sinkConfig.key, metrics: metrics.sink, logger });
+  sink?.start();
   const server = createJudgeServer({
     cache,
     providersFor,
@@ -49,8 +55,11 @@ async function main(): Promise<void> {
     basePath: config.basePath,
     budgetMs: config.budgetMs,
     validators: compileValidators(),
-    metrics: createMetrics(),
+    metrics,
     logger,
+    ...(sink === undefined || sinkConfig === null
+      ? {}
+      : { verdictSink: { sink, cellId: sinkConfig.cellId, specSelectors: new Set([...chainNames.keys()].map((k) => k.toString())) } }),
   });
   server.listen(config.port, config.host, () => {
     logger.log("info", "judge listening", {
@@ -59,6 +68,7 @@ async function main(): Promise<void> {
       evaluatePath: `${config.basePath}/v1/evaluate`,
       auth: config.auth.mode,
       budgetMs: config.budgetMs,
+      verdictSink: sinkConfig === null ? "off" : sinkConfig.url,
       tokens: tokens.map((t) => ({ symbol: t.symbol, tokenId: t.tokenId, cachedSpecHash: t.cachedSpecHash, active: cache.active(t.tokenId) })),
     });
     if (config.auth.mode === "insecure") {
@@ -69,6 +79,7 @@ async function main(): Promise<void> {
   const shutdown = (signal: string): void => {
     logger.log("info", "shutting down", { signal });
     cache.stop();
+    sink?.stop();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 5000).unref();
   };

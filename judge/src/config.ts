@@ -25,6 +25,8 @@ export type JudgeConfig = {
   /** Two independent RPC URLs per spec chain name. */
   rpc: ReadonlyMap<string, readonly [string, string]>;
   logLevel: LogLevel;
+  /** API read-model sink; null disables it. */
+  verdictSink: { url: string; key: string; cellId: string } | null;
 };
 
 /** Spec chain name to the .env provider prefix (RPC_<PREFIX>_1 and RPC_<PREFIX>_2). */
@@ -78,6 +80,16 @@ function parseAuth(env: Env): AuthConfig {
   }
 }
 
+/** Mirrors the API: INTERNAL_INGEST_KEY, falling back to JUDGE_HMAC_SECRET. */
+function parseSink(env: Env): JudgeConfig["verdictSink"] {
+  const url = env.VERDICT_SINK_URL;
+  if (url === undefined || url === "") return null;
+  if (!/^https?:\/\/[^\s]+$/.test(url)) throw new ConfigError("VERDICT_SINK_URL must be an http(s) URL");
+  const key = env.VERDICT_SINK_KEY ?? env.INTERNAL_INGEST_KEY ?? env.JUDGE_HMAC_SECRET ?? "";
+  if (key.length < 16) throw new ConfigError("VERDICT_SINK_URL needs INTERNAL_INGEST_KEY (or JUDGE_HMAC_SECRET), at least 16 chars");
+  return { url, key, cellId: env.JUDGE_CELL_ID ?? "" };
+}
+
 /** RPC URLs for every chain the specs name; both providers are mandatory and must differ. */
 export function rpcFor(env: Env, chainNames: Iterable<string>): Map<string, readonly [string, string]> {
   const out = new Map<string, readonly [string, string]>();
@@ -112,5 +124,6 @@ export function loadConfig(env: Env): Omit<JudgeConfig, "rpc"> {
       .filter((p) => p !== ""),
     deploymentsPath: required(env, "JUDGE_DEPLOYMENTS_PATH"),
     logLevel: parseLogLevel(env.JUDGE_LOG_LEVEL),
+    verdictSink: parseSink(env),
   };
 }

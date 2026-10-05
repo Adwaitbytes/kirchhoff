@@ -77,3 +77,42 @@ docker build -f judge/Dockerfile -t kirchhoff/judge:dev .   # from the repo root
 
 Load and chaos: `load/RESULTS.md`, `CHAOS.md`. Fixtures: `test/fixtures/crafted/` (from the spec
 examples) and `test/fixtures/real/` (Sepolia CCIP 2.0 sends, captured by `scripts/capture-real.ts`).
+
+## Verdict sink (API read model)
+
+With `VERDICT_SINK_URL` set, every answered message whose chains are in the specs is reported to the API's
+`POST /internal/verdicts` (header `x-kirchhoff-internal-key` = `INTERNAL_INGEST_KEY`, falling back to
+`JUDGE_HMAC_SECRET`, as on the API; `VERDICT_SINK_KEY` overrides). Reports carry `cellId` (`JUDGE_CELL_ID`, else the
+request's `verifier_id`), the decision (PASS, FAIL or PENDING), reason code, note, latency, both selectors, amount,
+sender, receiver, token and always `sourceTxHash`. The sink runs after the answer is written: `offer()` is synchronous,
+a bounded queue (5000) drops the oldest report while the API is down (`judge_verdict_sink_dropped_total{reason="overflow"}`),
+batches of up to 100 go out one at a time with backoff, and a batch the API rejects with a 4xx is dropped
+(`reason="rejected"`). `test/sink.test.ts` validates reports with the API's own `parseVerdictReport` and checks a hung
+API never delays a verdict.
+
+## Live testnet check (2026-10-05)
+
+Judge on `deployments/testnet.json` with `RPC_*_1/_2` from `.env` (Tenderly gateway and publicnode per chain), HMAC on:
+
+```
+$ JUDGE_SPEC_PATH=../engine/specs/kETH.yaml JUDGE_DEPLOYMENTS_PATH=../deployments/testnet.json node src/main.ts
+{"msg":"judge listening",...,"auth":"hmac",...,"tokens":[{"symbol":"kETH","tokenId":"0xe7cb...eb9c",
+ "cachedSpecHash":"0x22c75309594e0a07596c003695911bb61b1618c9519c1e6d32175ab719915dfe","active":{"state":"synced","activeSpecHash":null}}]}
+$ curl -s localhost:18100/readyz
+{"status":"ready"}
+
+# real Sepolia CCIP 2.0 send (test/fixtures/real/sepolia-dca61a6f.json, tx 0xdca61a6f...d602), signed like the verifier:
+HTTP 200 in 26.6ms {"decision":"PASS","message_id":"0x8d541ce3...1f54","reason":"OK no protected token"}
+# the same payload with source token/pool set to testnet kETH (derived, not a real kETH send):
+HTTP 200 in 21.3ms {"decision":"FAIL","message_id":"0x8d541ce3...1f54","reason":"UNKNOWN_TOKEN kETH no active spec in registry"}
+# unsigned:
+HTTP 401 {"error":"unauthorized"}
+```
+
+The registry read synced through both providers (Ready). kETH is registered in `KirchhoffRegistry`
+(`issuerOf` = the issuer Safe `0x1fdF...fc46`) but no spec has been proposed (`pendingSpec` empty), so every kETH
+message FAILs `UNKNOWN_TOKEN` deterministically, before any ledger read, until the Safe proposes and activates
+`0x22c75309...5dfe` (the hash of `engine/specs/kETH.yaml` resolved against `deployments/testnet.json`). No real kETH
+CCIP send exists on Sepolia yet (no `LockedOrBurned` from the kETH pool in the last 45,000 blocks).
+The k3d cell's Judge runs the same testnet config (`JUDGE_AUTH=hmac ccv/scripts/judge-deploy.sh engine/specs/kETH.yaml
+deployments/testnet.json`, Anvil RPC overrides removed): Ready, same log line.

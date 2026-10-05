@@ -13,6 +13,7 @@ import { createMetrics, type JudgeMetrics } from "../../src/metrics.ts";
 import { createProviders, type ChainProviders } from "../../src/rpc.ts";
 import { compileValidators, type EvaluateRequest } from "../../src/schema.ts";
 import { createJudgeServer } from "../../src/server.ts";
+import { VerdictSink } from "../../src/sink.ts";
 import { SpecCache, loadTokens, type ProtectedToken } from "../../src/spec-cache.ts";
 import { HEADER_API_KEY, HEADER_SIGNATURE, HEADER_TIMESTAMP, sign, stringToSign } from "../../src/hmac.ts";
 import { RpcStub, ccipSendLogs, conservedLedger, type LedgerState } from "./rpc-stub.ts";
@@ -45,6 +46,7 @@ export type Harness = {
   cache: SpecCache;
   metrics: JudgeMetrics;
   logs: string[];
+  sink: VerdictSink | undefined;
   /** Applies a change to both providers of a chain. */
   both(chain: bigint, change: (stub: RpcStub) => void): void;
   ledger(chain: bigint, provider: 0 | 1): LedgerState;
@@ -58,6 +60,8 @@ export type HarnessOptions = {
   syncNow?: boolean;
   /** Alternative deployment record; the default arb debit log is only seeded for the default one. */
   deploymentsPath?: string;
+  /** Wires a VerdictSink posting to this base URL. */
+  sinkUrl?: string;
 };
 
 export function contractsOn(token: ProtectedToken, chain: bigint) {
@@ -114,6 +118,11 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   const logs: string[] = [];
   const logger: Logger = createLogger("debug", (_level, line) => logs.push(line));
   const metrics = createMetrics();
+  const sink =
+    options.sinkUrl === undefined
+      ? undefined
+      : new VerdictSink({ url: options.sinkUrl, key: "test-internal-key-123", metrics: metrics.sink, logger, flushMs: 50 });
+  sink?.start();
   const server: Server = createJudgeServer({
     cache,
     providersFor,
@@ -123,6 +132,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     validators: compileValidators(),
     metrics,
     logger,
+    ...(sink === undefined ? {} : { verdictSink: { sink, cellId: "kirchhoff-cell-1", specSelectors: new Set([HOME, ARB, BASE].map(String)) } }),
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -143,7 +153,9 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       if (l === undefined) throw new Error("no ledger");
       return l;
     },
+    sink,
     async close() {
+      sink?.stop();
       cache.stop();
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => { resolve(); }));

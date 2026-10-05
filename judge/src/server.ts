@@ -9,6 +9,7 @@ import { evaluate, type EvaluateDeps, type Outcome } from "./evaluate.ts";
 import { verifyHmac } from "./hmac.ts";
 import type { Logger } from "./log.ts";
 import type { JudgeMetrics } from "./metrics.ts";
+import { toReport, type VerdictSink } from "./sink.ts";
 import { describeSchemaErrors, type EvaluateResponse, type PolicyHookValidators } from "./schema.ts";
 
 export const MAX_BODY_BYTES = 1024 * 1024;
@@ -23,6 +24,8 @@ export type ServerDeps = EvaluateDeps & {
   metrics: JudgeMetrics;
   logger: Logger;
   now?: () => number;
+  /** Optional verdict sink to the API read model; called after the answer is sent, never awaited. */
+  verdictSink?: { sink: VerdictSink; cellId: string; specSelectors: ReadonlySet<string> };
 };
 
 class BodyTooLarge extends Error {}
@@ -139,6 +142,16 @@ export function createJudgeServer(deps: ServerDeps): Server {
     }
     const latencyMs = Math.round((performance.now() - startedAt) * 100) / 100;
     const messageId = request.message_id as Hex;
+    const report = (decision: "PASS" | "FAIL" | "PENDING", reasonString: string, symbol: string | null): void => {
+      const target = deps.verdictSink;
+      if (target === undefined) return;
+      try {
+        const r = toReport({ cellId: target.cellId, request, decision, reasonString, symbol, latencyMs, evaluatedAt: new Date(now()) }, target.specSelectors);
+        if (r !== null) target.sink.offer(r);
+      } catch (e) {
+        logger.log("warn", "verdict sink offer failed", { messageId, error: e instanceof Error ? e.message : String(e) });
+      }
+    };
 
     switch (outcome.kind) {
       case "invalid": {
@@ -161,6 +174,7 @@ export function createJudgeServer(deps: ServerDeps): Server {
           evidence: outcome.evidence,
         });
         send(res, 503, { error: reason });
+        report("PENDING", outcome.reasonString, outcome.symbol);
         return;
       }
       case "verdict": {
@@ -173,6 +187,7 @@ export function createJudgeServer(deps: ServerDeps): Server {
         else logger.log("debug", "verdict PASS", fields);
         const response: EvaluateResponse = { decision: outcome.decision, message_id: request.message_id, reason };
         send(res, 200, response);
+        report(outcome.decision, outcome.reasonString, outcome.symbol);
         return;
       }
     }

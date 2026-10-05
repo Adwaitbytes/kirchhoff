@@ -113,7 +113,7 @@ psql_exec() { kubectl -n "$NS" exec -i postgres-0 -- psql -v ON_ERROR_STOP=1 -qt
 log "rendering Secret judge-env from .env"
 mkdir -p "$TMP/judge"
 for key in RPC_ETH_SEPOLIA_1 RPC_ETH_SEPOLIA_2 RPC_ARB_SEPOLIA_1 RPC_ARB_SEPOLIA_2 RPC_BASE_SEPOLIA_1 RPC_BASE_SEPOLIA_2 \
-  JUDGE_HMAC_SECRET JUDGE_TIME_BUDGET_MS JUDGE_SPEC_SYNC_SECONDS; do
+  JUDGE_HMAC_SECRET JUDGE_TIME_BUDGET_MS JUDGE_SPEC_SYNC_SECONDS VERDICT_SINK_URL INTERNAL_INGEST_KEY; do
   value="$(env_get "$key")"
   [ -n "$value" ] && printf '%s' "$value" >"$TMP/judge/$key"
 done
