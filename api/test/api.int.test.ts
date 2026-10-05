@@ -40,6 +40,7 @@ let db: Db;
 let app: App;
 let cfg: IndexerConfig;
 let incidentId: Hex;
+let loopIncidentId: Hex;
 let baseUrl: string;
 
 async function tickAll(): Promise<void> {
@@ -67,10 +68,18 @@ beforeAll(async () => {
   const tx = await world.bridgeCredit(HOME, forged, ACCOUNTS.attacker.address, stolen, ARB);
   const evidenceHash = keccak256(toHex("evidence:kelp"));
   for (const c of [HOME, ARB, BASE]) {
-    await world.breach(c, { epochId: 2n, delta: -stolen, evidenceHash, reason: 2, offendingChain: HOME, offendingTx: tx, recipient: ACCOUNTS.attacker.address, amount: stolen, messageId: forged });
+    // Like W1: a Junction breach reports delta 0 (W1 does not compute the Loop Rule).
+    await world.breach(c, { epochId: 2n, delta: 0n, evidenceHash, reason: 2, offendingChain: HOME, offendingTx: tx, recipient: ACCOUNTS.attacker.address, amount: stolen, messageId: forged });
   }
   incidentId = incidentIdOf(TOKEN_ID, evidenceHash).toLowerCase() as Hex;
   for (const c of [HOME, ARB, BASE]) await world.quarantine(c, incidentId, [ACCOUNTS.attacker.address]);
+  // Like W2 confirming the deficit: a Loop Rule BREACH with no offending credit (zero tx, recipient and message).
+  const loopEvidence = keccak256(toHex("evidence:loop"));
+  const zero32: Hex = `0x${"0".repeat(64)}`;
+  for (const c of [HOME, ARB, BASE]) {
+    await world.breach(c, { epochId: 3n, delta: -stolen, evidenceHash: loopEvidence, reason: 6, offendingChain: null, offendingTx: zero32, recipient: "0x0000000000000000000000000000000000000000", amount: stolen, messageId: zero32 });
+  }
+  loopIncidentId = incidentIdOf(TOKEN_ID, loopEvidence).toLowerCase() as Hex;
   await tickAll();
 
   const rpc = world.rpc;
@@ -144,11 +153,13 @@ describe("REST read model", () => {
     const first = await get<EpochsResponse>("/v1/tokens/kETH/epochs?limit=1");
     expect(first.status).toBe(200);
     expect(first.body.items).toHaveLength(1);
-    expect(first.body.items[0]).toMatchObject({ status: "BROKEN", reason: "DEBIT_NOT_FOUND", incidentId });
+    expect(first.body.items[0]).toMatchObject({ status: "BROKEN", reason: "LOOP_DEFICIT", delta: (-(4n * 10n ** 18n)).toString() });
     expect(first.body.nextCursor).not.toBeNull();
     const second = await get<EpochsResponse>(`/v1/tokens/kETH/epochs?limit=5&cursor=${first.body.nextCursor ?? ""}`);
-    expect(second.body.items[0]).toMatchObject({ epochId: "1", status: "CONSERVED", delta: "0" });
-    expect(second.body.items[0]?.reportTxs).toHaveLength(3);
+    expect(second.body.items[0]).toMatchObject({ status: "BROKEN", reason: "DEBIT_NOT_FOUND", incidentId });
+    const conserved = second.body.items.find((e) => e.status === "CONSERVED");
+    expect(conserved).toMatchObject({ epochId: "1", delta: "0" });
+    expect(conserved?.reportTxs).toHaveLength(3);
   });
 
   it("ingests Judge verdicts from the internal sink and serves the committee view", async () => {
@@ -203,6 +214,34 @@ describe("REST read model", () => {
       expect(s.text).not.toMatch(/[—–]/);
     }
     expect(n?.nextSteps).toContain("rotate_bridge_verifier_key");
+  });
+
+  it("regression: Junction incident deltas come from ledger rows (before = last epoch, after = confirming Loop Rule breach)", async () => {
+    const { body } = await get<IncidentResponse>(`/v1/incidents/${incidentId}`);
+    expect(body.incident.deltaBefore).toBe("0");
+    expect(body.incident.deltaAfter).toBe((-(4n * 10n ** 18n)).toString());
+    expect(body.narrative?.summary.map((s) => s.text).join(" ")).toContain("Delta moved from 0 to -4 kETH");
+  });
+
+  it("regression: a Loop Rule incident has a loop-deficit evidence item and no zero-address credit placeholders", async () => {
+    const { status, body } = await get<IncidentResponse>(`/v1/incidents/${loopIncidentId}`);
+    expect(status).toBe(200);
+    expect(body.incident).toMatchObject({ reason: "LOOP_DEFICIT", deltaAfter: (-(4n * 10n ** 18n)).toString() });
+    expect(body.incident.offending).toMatchObject({ bridge: "loop_rule", amount: (4n * 10n ** 18n).toString() });
+    expect(BigInt(body.incident.offending.tx.hash)).not.toBe(0n);
+    const kinds = body.evidence.map((e) => e.kind);
+    expect(kinds).not.toContain("offending_credit");
+    expect(kinds).not.toContain("debit_search");
+    expect(body.evidence[0]).toMatchObject({ kind: "epoch_report" });
+    expect(body.evidence[0]?.label).toMatch(/^Loop Rule: backing below claims by 4 kETH at the pinned blocks \(blocksHash 0x[0-9a-f]{4}\.\.\.[0-9a-f]{4}\), delta -4 kETH$/);
+    const text = JSON.stringify([body.evidence.map((e) => e.label), body.narrative?.summary, body.narrative?.timeline]);
+    expect(text).not.toMatch(/0x0000|unknown credited/);
+  });
+
+  it("regression: incident tokenStatus equals GET /tokens/{t}/status token.status", async () => {
+    const [inc, st] = await Promise.all([get<IncidentResponse>(`/v1/incidents/${incidentId}`), get<TokenStatusResponse>("/v1/tokens/kETH/status")]);
+    expect(inc.body.tokenStatus).toBe(st.body.token.status);
+    expect(inc.body.resolution.canResolve).toBe(st.body.token.status === "QUARANTINED");
   });
 
   it("returns ApiErrorBody for unknown tokens, incidents and routes", async () => {

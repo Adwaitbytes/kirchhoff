@@ -82,10 +82,10 @@ export function templateNarrative(bundle: IncidentBundle, now: Date = new Date()
         : incident.reason === "LOOP_DEFICIT"
           ? "and the Loop Rule found backing below claims"
           : `failing the Junction Rule with ${incident.reason}`;
-  const loopOnly = (incident.reason === "LOOP_DEFICIT" || incident.reason === "RESERVE_SHORTFALL") && off.bridge === "unknown";
+  const loopOnly = incident.reason === "LOOP_DEFICIT" || incident.reason === "RESERVE_SHORTFALL" || off.bridge === "loop_rule";
   if (loopOnly) {
     // A Loop Rule breach has no single offending credit: state the deficit, not a fabricated credit.
-    summary.push({ text: `The Loop Rule found ${incident.token} backing below claims by ${units(off.amount)} ${incident.token} (${incident.reason}).`, citations: [...breach, ...credit].slice(0, 2) });
+    summary.push({ text: `The Loop Rule found ${incident.token} backing below claims by ${units(off.amount)} ${incident.token} at the pinned blocks (${incident.reason}).`, citations: [...epoch, ...breach].slice(0, 2) });
   } else {
     summary.push({
       text: `${bridge} credited ${units(off.amount)} ${incident.token} to ${short(off.recipient)} on ${CHAINS[off.chain].label} ${what}.`,
@@ -105,7 +105,7 @@ export function templateNarrative(bundle: IncidentBundle, now: Date = new Date()
     summary.push({ text: `The Judge refused ${refused.length} CCIP ${refused.length === 1 ? "transfer" : "transfers"} of ${incident.token} after the breach, so the forged supply did not spread over CCIP.`, citations: refused.slice(0, 3) });
   }
   if (guard.length > 0) summary.push({ text: "KirchhoffGuard reverted onward transfers from the tainted address.", citations: guard.slice(0, 2) });
-  summary.push({
+  if (incident.deltaBefore !== incident.deltaAfter) summary.push({
     text: `Delta moved from ${units(incident.deltaBefore)} to ${units(incident.deltaAfter)} ${incident.token}.`,
     citations: (epoch.length > 0 ? epoch : breach.length > 0 ? breach : credit).slice(0, 2),
   });
@@ -158,7 +158,11 @@ export async function narrateIncident(bundle: IncidentBundle, opts: NarrateOptio
   if (!opts.provider) return templateNarrative(bundle, now);
   try {
     const facts = {
-      incident: bundle.incident,
+      // A Loop Rule breach has no offending credit; do not hand the model zero-address placeholders.
+      incident:
+        bundle.incident.offending.bridge === "loop_rule"
+          ? { ...bundle.incident, offending: { kind: "loop_rule", note: "No single offending credit: backing fell below claims at the pinned blocks.", deficit: bundle.incident.offending.amount } }
+          : bundle.incident,
       evidence: bundle.evidence.map((e) => ({ id: e.id, kind: e.kind, chain: e.chain, at: e.at, label: e.label, tx: e.tx?.hash ?? null, blocks: e.blocks })),
       actions: bundle.actions.map((a) => ({ kind: a.kind, applied: a.applied, chains: a.txs.map((t) => t.chain) })),
       blastRadius: bundle.blastRadius,

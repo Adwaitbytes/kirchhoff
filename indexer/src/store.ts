@@ -7,7 +7,7 @@ import { refreshMatches } from "./matches.ts";
 /** Extra reads taken at the event's block, because the events alone do not carry these fields. */
 export type Enrichment = {
   epochs: Map<string, { reason: number; evaluatedAt: bigint; blocksHash: Hex; evidenceHash: Hex }>;
-  breaches: Map<string, { messageId: Hex; delta: bigint; epochId: bigint }>;
+  breaches: Map<string, { messageId: Hex | null; delta: bigint; epochId: bigint; blocksHash: Hex }>;
 };
 
 export type ApplyContext = {
@@ -119,8 +119,8 @@ export async function applyEvents(client: DbClient, events: readonly IndexedEven
         const offendingChain = chainKeyOf(ev.offendingChain);
         await client.query(
           `insert into breaches (chain, tx_hash, log_index, block, block_time, token_symbol, incident_id, reason, evidence_hash, offending_chain,
-                                 offending_selector, offending_tx, recipient, amount, message_id, delta, epoch_id)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) on conflict do nothing`,
+                                 offending_selector, offending_tx, recipient, amount, message_id, delta, epoch_id, blocks_hash)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) on conflict do nothing`,
           [
             ...base,
             symbol,
@@ -132,9 +132,10 @@ export async function applyEvents(client: DbClient, events: readonly IndexedEven
             ev.offendingTx.toLowerCase(),
             ev.recipient,
             ev.amount.toString(),
-            extra?.messageId.toLowerCase() ?? null,
+            extra?.messageId?.toLowerCase() ?? null,
             extra?.delta.toString() ?? null,
             extra?.epochId.toString() ?? null,
+            extra?.blocksHash.toLowerCase() ?? null,
           ],
         );
         const inserted = await client.query<{ created: boolean }>(
@@ -158,13 +159,13 @@ export async function applyEvents(client: DbClient, events: readonly IndexedEven
             ev.offendingTx.toLowerCase(),
             ev.recipient,
             ev.amount.toString(),
-            extra?.messageId.toLowerCase() ?? null,
+            extra?.messageId?.toLowerCase() ?? null,
             extra?.delta.toString() ?? null,
             time(ev.block),
           ],
         );
         if (inserted.rows[0]?.created === true) newIncidents.push(incidentId);
-        if (extra) touched.push(extra.messageId);
+        if (extra?.messageId) touched.push(extra.messageId);
         await client.query("update tokens set active_incident_id = coalesce(active_incident_id, $2) where symbol = $1", [symbol, incidentId]);
         await client.query(
           `insert into incident_actions (chain, tx_hash, log_index, block, block_time, token_symbol, incident_id, kind)

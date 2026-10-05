@@ -286,7 +286,7 @@ export class World {
     return this.report(key, 1, payload);
   }
 
-  async breach(key: ChainKey, p: { epochId: bigint; delta: bigint; evidenceHash: Hex; reason: number; offendingChain: ChainKey; offendingTx: Hex; recipient: Address; amount: bigint; messageId: Hex }): Promise<Hex> {
+  async breach(key: ChainKey, p: { epochId: bigint; delta: bigint; evidenceHash: Hex; reason: number; offendingChain: ChainKey | null; offendingTx: Hex; recipient: Address; amount: bigint; messageId: Hex }): Promise<Hex> {
     const payload = encodeAbiParameters(
       [
         { type: "uint64" },
@@ -300,7 +300,7 @@ export class World {
         { type: "uint256" },
         { type: "bytes32" },
       ],
-      [p.epochId, p.delta, keccak256(toHex("blocks:breach")), p.evidenceHash, p.reason, CHAINS[p.offendingChain].selector, p.offendingTx, p.recipient, p.amount, p.messageId],
+      [p.epochId, p.delta, keccak256(toHex("blocks:breach")), p.evidenceHash, p.reason, p.offendingChain === null ? 0n : CHAINS[p.offendingChain].selector, p.offendingTx, p.recipient, p.amount, p.messageId],
     );
     return this.report(key, 2, payload);
   }

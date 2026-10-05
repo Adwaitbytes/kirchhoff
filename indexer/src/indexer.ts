@@ -11,7 +11,7 @@ import {
   type ChainKey,
 } from "@kirchhoff/sdk";
 import type { IndexerConfig } from "./config.ts";
-import { withTransaction, type Db } from "./db.ts";
+import { withTransaction, type Db, type Queryable } from "./db.ts";
 import { decodeLogs, watchedAddresses, type RawLog } from "./decode.ts";
 import { applyEvents, eventKey, incidentIdOf, rewindChain, type Enrichment } from "./store.ts";
 import { createChainClient, redactRpcError } from "./rpc.ts";
@@ -264,8 +264,14 @@ export class ChainIndexer {
         const breach = await this.client
           .readContract({ address: this.dep.ledger, abi: ledgerAbi, functionName: "breachOf", args: [incidentIdOf(this.tokenId, ev.evidenceHash)], blockNumber: ev.block })
           .catch(() => null);
-        if (breach && breach.messageId !== ZERO32) {
-          out.breaches.set(eventKey(ev.txHash, ev.logIndex), { messageId: breach.messageId, delta: breach.delta, epochId: breach.epochId });
+        // Loop Rule breaches carry no message id; their delta and pinned blocks still matter.
+        if (breach) {
+          out.breaches.set(eventKey(ev.txHash, ev.logIndex), {
+            messageId: breach.messageId === ZERO32 ? null : breach.messageId,
+            delta: breach.delta,
+            epochId: breach.epochId,
+            blocksHash: breach.blocksHash,
+          });
         }
       }
     }
@@ -337,11 +343,14 @@ export class ChainIndexer {
       const reason = epoch ? reasonFromValue(epoch.reason) : "OK";
       const ledgerStatus = statusFromValue(statusValue);
       const updatedAtDate = updatedAt > 0n ? new Date(Number(updatedAt) * 1000) : null;
-      const prev = await this.db.query<{ ledger_status: string; ledger_delta: string; frozen: boolean }>(
-        "select ledger_status, ledger_delta, frozen from chain_state where chain = $1",
+      const tokenReads = d.role === "home" ? await this.tokenReads(head) : null;
+      // chain_state and the token row change in one transaction, so every reader sees one block's status.
+      await withTransaction(this.db, async (tx) => {
+      const prev = await tx.query<{ ledger_status: string; ledger_delta: string; frozen: boolean }>(
+        "select ledger_status, ledger_delta, frozen from chain_state where chain = $1 for update",
         [this.chain],
       );
-      await this.db.query(
+      await tx.query(
         `insert into chain_state (chain, token_symbol, block, block_time, supply, escrow, ccip_lockbox, ledger_status, ledger_reason, ledger_delta,
                                   ledger_updated_at, ledger_stale, frozen, read_ok, read_error, read_error_since, updated_at)
          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,true,null,null,now())
@@ -365,11 +374,12 @@ export class ChainIndexer {
           frozen,
         ],
       );
-      if (d.role === "home") await this.snapshotToken(head, ledgerStatus, reason, delta, updatedAtDate, stale, epoch?.epochId ?? 0n);
+      if (tokenReads) await this.writeToken(tx, tokenReads, ledgerStatus, reason, delta, updatedAtDate, stale, epoch?.epochId ?? 0n);
       const p = prev.rows[0];
       if (p?.ledger_status !== ledgerStatus || p.ledger_delta !== delta.toString() || p.frozen !== frozen) {
-        await this.db.query("insert into stream_events (token_symbol, channel, ref) values ($1, 'status', $2)", [this.cfg.symbol, JSON.stringify({ chain: this.chain })]);
+        await tx.query("insert into stream_events (token_symbol, channel, ref) values ($1, 'status', $2)", [this.cfg.symbol, JSON.stringify({ chain: this.chain })]);
       }
+      });
     } catch (e) {
       const msg = redactRpcError(e);
       await this.db.query(
@@ -380,7 +390,7 @@ export class ChainIndexer {
     }
   }
 
-  private async snapshotToken(head: Head, status: string, reason: string, delta: bigint, updatedAt: Date | null, stale: boolean, epochId: bigint): Promise<void> {
+  private async tokenReads(head: Head): Promise<{ incident: Hex | null; specHash: Hex | null }> {
     const d = this.dep;
     const at = { blockNumber: head.number } as const;
     const [incident, specHash] = await Promise.all([
@@ -389,7 +399,21 @@ export class ChainIndexer {
         ? this.client.readContract({ address: d.registry, abi: registryAbi, functionName: "activeSpecHash", args: [this.tokenId], ...at }).catch(() => null)
         : Promise.resolve(null),
     ]);
-    await this.db.query(
+    return { incident, specHash };
+  }
+
+  private async writeToken(
+    tx: Queryable,
+    reads: { incident: Hex | null; specHash: Hex | null },
+    status: string,
+    reason: string,
+    delta: bigint,
+    updatedAt: Date | null,
+    stale: boolean,
+    epochId: bigint,
+  ): Promise<void> {
+    const { incident, specHash } = reads;
+    await tx.query(
       `update tokens set status = $2, reason = $3, delta = $4, updated_at = $5, stale = $6, epoch_id = $7,
          active_incident_id = case when $8::text is null then active_incident_id when $8 = $10 then null else $8 end,
          spec_hash = coalesce($9, spec_hash)
@@ -408,6 +432,7 @@ export class ChainIndexer {
       ],
     );
   }
+
 }
 
 /** Runs every chain's indexer until `signal` aborts. A failing chain backs off without stopping the others. */

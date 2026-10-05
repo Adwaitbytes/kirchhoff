@@ -42,6 +42,18 @@ type IncidentRow = {
   recovery_ends_at: Date | null;
 };
 
+const ZERO32 = `0x${"0".repeat(64)}`;
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const LOOP_REASONS: readonly ReasonCode[] = ["LOOP_DEFICIT", "RESERVE_SHORTFALL"];
+
+/** Loop Rule breaches have no offending credit (the contract records recipient = address(0)). */
+function isLoopIncident(row: { reason: ReasonCode; offending_tx: string; recipient: string }): boolean {
+  return LOOP_REASONS.includes(row.reason) || BigInt(row.offending_tx) === 0n || row.recipient === ZERO_ADDRESS;
+}
+
+/** The home BREACH report that anchors an incident (a Loop Rule incident's only evidence of where it was found). */
+type Anchor = { blocksHash: string | null; reportTx: TxRef | null };
+
 const JUNCTION_OR_LOOP: readonly ReasonCode[] = ["DEBIT_NOT_FOUND", "AMOUNT_MISMATCH", "RECIPIENT_MISMATCH", "DOUBLE_CREDIT", "LOOP_DEFICIT", "RESERVE_SHORTFALL"];
 const short = (h: string): string => `${h.slice(0, 6)}...${h.slice(-4)}`;
 const iso = (d: Date | null): string | null => (d ? d.toISOString() : null);
@@ -69,7 +81,7 @@ export class IncidentBuilder {
     return row;
   }
 
-  async incident(id: string): Promise<{ incident: Incident; token: TokenRow; row: IncidentRow }> {
+  async incident(id: string): Promise<{ incident: Incident; token: TokenRow; row: IncidentRow; anchor: Anchor }> {
     const row = await this.row(id);
     const token = await this.rm.tokenRow(row.token_symbol);
     const credit = (
@@ -78,21 +90,41 @@ export class IncidentBuilder {
         [row.offending_tx],
       )
     ).rows[0];
+    const home = token.home_chain as ChainKey;
+    const reports = await this.db.query<{ chain: ChainKey; tx_hash: string; block: string; block_time: Date; delta: string | null; blocks_hash: string | null }>(
+      "select chain, tx_hash, block::text, block_time, delta::text, blocks_hash from breaches where incident_id = $1 order by (chain = $2) desc, block, log_index",
+      [row.id, home],
+    );
+    const homeReport = reports.rows.find((r) => r.chain === home) ?? reports.rows[0];
+    // Delta before: the last EPOCH recorded on the home ledger strictly before the first BREACH report.
     const before = (
       await this.db.query<{ delta: string }>(
-        "select delta::text from epochs where token_symbol = $1 and chain = $2 and evaluated_at <= $3 order by epoch_id desc limit 1",
-        [row.token_symbol, token.home_chain, row.broken_at],
+        `select delta::text from epochs where token_symbol = $1 and chain = $2
+           and (block < $3::numeric) order by block desc, log_index desc limit 1`,
+        [row.token_symbol, home, homeReport?.block ?? "0"],
       )
     ).rows[0];
-    const lastBreach = (
-      await this.db.query<{ delta: string | null }>(
-        "select delta::text from breaches where incident_id = $1 or (token_symbol = $2 and block_time >= $3) order by block_time desc limit 1",
-        [row.id, row.token_symbol, row.broken_at],
-      )
-    ).rows[0];
-    const offChain: ChainKey = row.offending_chain && isChainKey(row.offending_chain) ? row.offending_chain : (token.home_chain as ChainKey);
-    const offendingAt = credit?.block_time ?? row.broken_at;
+    // Delta after: the breach report's own delta when it carries one (W2 LOOP_DEFICIT does); W1 Junction
+    // breaches report 0 because W1 does not compute the Loop Rule, so take the next confirming Loop Rule
+    // BREACH on the home ledger; failing both, the deficit the forged credit itself implies.
+    const own = homeReport?.delta && homeReport.delta !== "0" ? homeReport.delta : null;
+    const confirming = own
+      ? null
+      : (
+          await this.db.query<{ delta: string }>(
+            `select delta::text from breaches where token_symbol = $1 and chain = $2 and reason in ('LOOP_DEFICIT', 'RESERVE_SHORTFALL')
+               and delta is not null and delta <> 0 and block >= $3::numeric and ($4::timestamptz is null or block_time <= $4)
+             order by block, log_index limit 1`,
+            [row.token_symbol, home, homeReport?.block ?? "0", row.resolved_at],
+          )
+        ).rows[0]?.delta ?? null;
+    const deltaBefore = before?.delta ?? "0";
+    const deltaAfter = own ?? confirming ?? (BigInt(deltaBefore) - BigInt(row.amount)).toString();
+    const loopOnly = isLoopIncident(row);
+    const offChain: ChainKey = loopOnly ? home : row.offending_chain && isChainKey(row.offending_chain) ? row.offending_chain : home;
+    const offendingAt = loopOnly ? row.broken_at : (credit?.block_time ?? row.broken_at);
     const severity: Severity = JUNCTION_OR_LOOP.includes(row.reason) ? (row.status === "resolved" ? "SEV2" : "SEV1") : "SEV3";
+    const reportTx: TxRef | null = homeReport ? { chain: homeReport.chain, hash: homeReport.tx_hash as Hex, block: homeReport.block, timestamp: homeReport.block_time.toISOString() } : null;
     const incident: Incident = {
       id: row.id as Bytes32,
       token: row.token_symbol,
@@ -100,15 +132,16 @@ export class IncidentBuilder {
       severity,
       status: row.status,
       reason: row.reason,
-      deltaBefore: before?.delta ?? "0",
-      deltaAfter: row.delta_after ?? lastBreach?.delta ?? token.delta,
+      deltaBefore,
+      deltaAfter,
       offending: {
         chain: offChain,
-        tx: { chain: offChain, hash: row.offending_tx as Hex, block: credit?.block ?? "0", timestamp: offendingAt.toISOString() },
-        bridge: credit?.bridge ?? "unknown",
+        // A Loop Rule breach has no offending credit: the anchor is the home BREACH report itself.
+        tx: loopOnly && reportTx ? reportTx : { chain: offChain, hash: row.offending_tx as Hex, block: credit?.block ?? "0", timestamp: offendingAt.toISOString() },
+        bridge: loopOnly ? "loop_rule" : (credit?.bridge ?? "unknown"),
         recipient: row.recipient as Address,
-        amount: row.amount,
-        messageId: (row.message_id ?? credit?.message_id ?? `0x${"0".repeat(64)}`) as Bytes32,
+        amount: loopOnly ? (BigInt(deltaAfter) < 0n ? (-BigInt(deltaAfter)).toString() : row.amount) : row.amount,
+        messageId: (row.message_id ?? credit?.message_id ?? ZERO32) as Bytes32,
         claimedSrcChain: credit?.claimed_src_chain && isChainKey(credit.claimed_src_chain) ? credit.claimed_src_chain : offChain,
       },
       offendingBlockAt: offendingAt.toISOString(),
@@ -119,42 +152,55 @@ export class IncidentBuilder {
       resolvedAt: iso(row.resolved_at),
       recoveryEndsAt: iso(row.recovery_ends_at),
     };
-    return { incident, token, row };
+    return { incident, token, row, anchor: { blocksHash: homeReport?.blocks_hash ?? null, reportTx } };
   }
 
   /** The deterministic evidence bundle (PRD section 11 Narrator input). Ids are stable: ev-1, ev-2, ... in a fixed order. */
   async bundle(id: string): Promise<IncidentBundle> {
-    const { incident, token, row } = await this.incident(id);
+    const { incident, token, row, anchor } = await this.incident(id);
     const evidence: EvidenceItem[] = [];
     const add = (item: Omit<EvidenceItem, "id">): void => {
       evidence.push({ id: `ev-${evidence.length + 1}`, ...item });
     };
     const units = (a: string): string => `${formatUnits(a, token.decimals)} ${token.symbol}`;
     const off = incident.offending;
-    add({
-      kind: "offending_credit",
-      chain: off.chain,
-      at: incident.offendingBlockAt,
-      label: `${off.bridge === "weakbridge" ? "WeakBridge" : off.bridge} credited ${units(off.amount)} to ${short(off.recipient)} on ${CHAINS[off.chain].label} for message ${short(off.messageId)}`,
-      tx: off.tx,
-      blocks: null,
-      messageId: null,
-    });
-    const src = off.claimedSrcChain;
-    const srcState = (await this.db.query<{ block: string }>("select block from chain_state where chain = $1", [src])).rows[0];
-    const bridgeCfg = token.config.bridges.find((b) => b.id === off.bridge);
-    const window = BigInt(bridgeCfg?.searchWindowBlocks ?? "100");
-    const to = srcState ? BigInt(srcState.block) : 0n;
-    const matches = (await this.db.query<{ n: number }>("select count(*)::int as n from debits where message_id = $1", [off.messageId])).rows[0]?.n ?? 0;
-    add({
-      kind: "debit_search",
-      chain: src,
-      at: incident.brokenAt,
-      label: `Searched ${CHAINS[src].label} for the matching debit of message ${short(off.messageId)}: ${matches} found`,
-      tx: null,
-      blocks: { from: (to > window ? to - window : 0n).toString(), to: to.toString(), matches },
-      messageId: null,
-    });
+    const loopOnly = isLoopIncident(row);
+    if (loopOnly) {
+      add({
+        kind: "epoch_report",
+        chain: token.home_chain as ChainKey,
+        at: incident.brokenAt,
+        label: `Loop Rule: backing below claims by ${units((BigInt(incident.deltaAfter) < 0n ? -BigInt(incident.deltaAfter) : BigInt(incident.deltaAfter)).toString())} at the pinned blocks${anchor.blocksHash ? ` (blocksHash ${short(anchor.blocksHash)})` : ""}, delta ${units(incident.deltaAfter)}`,
+        tx: anchor.reportTx,
+        blocks: null,
+        messageId: null,
+      });
+    } else {
+      add({
+        kind: "offending_credit",
+        chain: off.chain,
+        at: incident.offendingBlockAt,
+        label: `${off.bridge === "weakbridge" ? "WeakBridge" : off.bridge} credited ${units(off.amount)} to ${short(off.recipient)} on ${CHAINS[off.chain].label} for message ${short(off.messageId)}`,
+        tx: off.tx,
+        blocks: null,
+        messageId: null,
+      });
+      const src = off.claimedSrcChain;
+      const srcState = (await this.db.query<{ block: string }>("select block from chain_state where chain = $1", [src])).rows[0];
+      const bridgeCfg = token.config.bridges.find((b) => b.id === off.bridge);
+      const window = BigInt(bridgeCfg?.searchWindowBlocks ?? "100");
+      const to = srcState ? BigInt(srcState.block) : 0n;
+      const matches = (await this.db.query<{ n: number }>("select count(*)::int as n from debits where message_id = $1", [off.messageId])).rows[0]?.n ?? 0;
+      add({
+        kind: "debit_search",
+        chain: src,
+        at: incident.brokenAt,
+        label: `Searched ${CHAINS[src].label} for the matching debit of message ${short(off.messageId)}: ${matches} found`,
+        tx: null,
+        blocks: { from: (to > window ? to - window : 0n).toString(), to: to.toString(), matches },
+        messageId: null,
+      });
+    }
     const breaches = await this.db.query<{ chain: ChainKey; tx_hash: Hex; block: string; block_time: Date; reason: ReasonCode; delta: string | null }>(
       "select chain, tx_hash, block, block_time, reason, delta::text from breaches where incident_id = $1 order by block_time, chain",
       [row.id],
@@ -266,9 +312,10 @@ export class IncidentBuilder {
         chain: home.chain,
         issuerSafe: (home.issuer_safe ?? "0x0000000000000000000000000000000000000000"),
         quarantineController: home.quarantine,
-        canResolve: token.status === "QUARANTINED",
+        canResolve: status.token.status === "QUARANTINED",
       },
-      tokenStatus: token.status,
+      // Same source and read as GET /tokens/{t}/status (one status() call), so the two never disagree.
+      tokenStatus: status.token.status,
     };
   }
 }
