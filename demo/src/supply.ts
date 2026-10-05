@@ -17,6 +17,7 @@ const adminAbi = parseAbi([
   "function MINTER_ROLE() view returns (bytes32)",
   "function hasRole(bytes32 role, address account) view returns (bool)",
   "function grantMintRole(address minter)",
+  "function revokeMintRole(address minter)",
   "function mint(address account, uint256 amount)",
 ]);
 
@@ -41,8 +42,8 @@ export async function seedHomeBacking(ctx: Context, target = SEED.escrowed): Pro
 }
 
 /**
- * Seeds remote claims: grants the deployer the RemoteKETH MINTER_ROLE (demo admin path) and mints the demo supply to
- * the deployer treasury. Idempotent via total supply.
+ * Seeds remote claims: temporarily grants the deployer the RemoteKETH MINTER_ROLE (demo admin path), mints the demo
+ * supply to the deployer treasury, then revokes the role. Idempotent via total supply.
  */
 export async function seedRemoteSupply(ctx: Context, role: "arb" | "base", target: bigint): Promise<Sent | null> {
   const chain = ctx.chains[role];
@@ -53,7 +54,10 @@ export async function seedRemoteSupply(ctx: Context, role: "arb" | "base", targe
   const minterRole = await read<`0x${string}`>(chain, { to: token, abi: remoteKethAbi, functionName: "MINTER_ROLE" });
   const isMinter = await read<boolean>(chain, { to: token, abi: remoteKethAbi, functionName: "hasRole", args: [minterRole, deployer.address] });
   if (!isMinter) await send(chain, deployer, { to: token, abi: adminAbi, functionName: "grantMintRole", args: [deployer.address] }, `grant deployer mint role (${role})`);
-  return send(chain, deployer, { to: token, abi: adminAbi, functionName: "mint", args: [deployer.address, target - supply] }, `seed ${role} supply +${target - supply}`);
+  const minted = await send(chain, deployer, { to: token, abi: adminAbi, functionName: "mint", args: [deployer.address, target - supply] }, `seed ${role} supply +${target - supply}`);
+  // Drop the temporary role so the minter set matches the KIRCH-SPEC again (W4 flags unlisted minters).
+  await send(chain, deployer, { to: token, abi: adminAbi, functionName: "revokeMintRole", args: [deployer.address] }, `revoke deployer mint role (${role})`);
+  return minted;
 }
 
 export async function seedAll(ctx: Context): Promise<Sent[]> {

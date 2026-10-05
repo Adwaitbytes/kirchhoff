@@ -1,17 +1,19 @@
 /**
- * demo/seed.ts (TESTNET SIMULATION): the Flow A "normal, conserved" traffic the demo opens on. A WeakBridge round
- * trip (home -> arb -> home) with matching debits and credits that the Junction Rule accepts, plus (testnet only) a
- * real CCIP token transfer Arbitrum Sepolia -> Ethereum Sepolia through our KirchhoffTokenPool lanes, native fees.
+ * demo/seed.ts (TESTNET SIMULATION): Flow A, the normal conserved traffic the demo opens on.
  *
- *   pnpm --filter @kirchhoff/demo seed --network local|testnet [--amount <wholeKETH>]
+ *   pnpm --filter @kirchhoff/demo seed --network local|testnet [--weakbridge] [--ccip] [--amount <wholeKETH>]
+ *
+ * --weakbridge  a WeakBridge round trip home -> arb -> home whose credits all carry a real debit (W1 matches them).
+ * --ccip        (testnet) a real CCIP round trip home -> arb -> home through the KirchhoffTokenPools, native fees:
+ *               the second leg is PRD Flow A (Arbitrum Sepolia -> Ethereum Sepolia), recorded with its source tx,
+ *               ccip.chain.link link and destination execution. No flag runs both.
  */
-import { parseEventLogs, type Address } from "viem";
-import { erc20Abi, kethAbi, routerAbi } from "./src/abi.ts";
+import { erc20Abi, kethAbi } from "./src/abi.ts";
+import { ccipTransfer } from "./src/ccip.ts";
 import { account, read, send } from "./src/chain.ts";
 import { main, parseArgs } from "./src/cli.ts";
-import { loadContext, tokenOf, type Context } from "./src/context.ts";
-import { approveToken, weakBridgeCredit, weakBridgeSend } from "./src/bridge.ts";
-import { ccipMessageUrl, type ChainRole } from "./src/networks.ts";
+import { loadContext, type Context } from "./src/context.ts";
+import { weakBridgeCredit, weakBridgeSend } from "./src/bridge.ts";
 import { stepEmitter, type StepEvent } from "./src/events.ts";
 
 async function ensureDeployerKeth(ctx: Context, amount: bigint): Promise<void> {
@@ -38,50 +40,27 @@ async function weakBridgeRoundTrip(ctx: Context, emit: (e: Omit<StepEvent, "labe
   emit({ step: "seed-weakbridge-back", status: "ok", chain: "home", title: "released on home (matching credit)", txHash: release.hash, explorerUrl: release.url, detail: { id: back.id } });
 }
 
-/** A real CCIP token transfer through the Router (testnet only; native fee). Best effort on a small budget. */
-async function ccipTransfer(ctx: Context, emit: (e: Omit<StepEvent, "label" | "network" | "at">) => StepEvent, amount: bigint): Promise<void> {
-  if (ctx.net.name !== "testnet") {
-    emit({ step: "seed-ccip", status: "skipped", title: "CCIP transfer skipped on local (no real Router)" });
-    return;
-  }
-  const from: ChainRole = "arb";
-  const chain = ctx.chains[from];
-  const router = chain.config.ccip?.router;
-  if (router === undefined) throw new Error("no CCIP router for arb");
-  const deployer = account("DEPLOYER");
-  const token = tokenOf(ctx, from);
-  const have = await read<bigint>(chain, { to: token, abi: erc20Abi, functionName: "balanceOf", args: [deployer.address] });
-  if (have < amount) {
-    emit({ step: "seed-ccip", status: "skipped", title: `deployer holds ${have} kETH on arb, need ${amount}` });
-    return;
-  }
-  const message = {
-    receiver: `0x${deployer.address.slice(2).padStart(64, "0")}`,
-    data: "0x" as const,
-    tokenAmounts: [{ token, amount }],
-    feeToken: "0x0000000000000000000000000000000000000000" as Address,
-    extraArgs: "0x" as const,
-  };
-  const fee = await read<bigint>(chain, { to: router, abi: routerAbi, functionName: "getFee", args: [ctx.net.chains.home.selector, message] });
-  await approveToken(ctx, from, deployer, router, amount);
-  emit({ step: "seed-ccip", status: "started", chain: "arb", title: `CCIP arb -> home ${amount} (fee ${fee} wei native)` });
-  const sent = await send(chain, deployer, { to: router, abi: routerAbi, functionName: "ccipSend", args: [ctx.net.chains.home.selector, message], value: fee }, "ccipSend arb -> home");
-  const msg = parseEventLogs({ abi: routerAbi, logs: sent.receipt.logs, eventName: "CCIPMessageSent" })[0];
-  const messageId = msg?.args.messageId ?? "0x0";
-  emit({ step: "seed-ccip", status: "ok", chain: "arb", title: "CCIP message sent (Flow A)", txHash: sent.hash, explorerUrl: sent.url, detail: { messageId, ccip: ccipMessageUrl(messageId) } });
-}
-
 async function run(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2), { options: ["amount"], flags: [] });
+  const args = parseArgs(process.argv.slice(2), { options: ["amount"], flags: ["weakbridge", "ccip"] });
   const ctx = await loadContext(args.network);
   const emit = stepEmitter(ctx.net.name);
-  const whole = BigInt(args.options.get("amount") ?? "10");
-  const amount = whole * 10n ** 18n;
+  const amount = BigInt(args.options.get("amount") ?? "1") * 10n ** 18n;
+  // Neither flag: both kinds of traffic (CCIP only where a real Router exists).
+  const both = !args.flags.has("weakbridge") && !args.flags.has("ccip");
   emit({ step: "seed", status: "started", title: "Flow A conserved traffic (Testnet simulation)", detail: { amount: amount.toString() } });
-  await weakBridgeRoundTrip(ctx, emit, amount);
-  await ccipTransfer(ctx, emit, amount).catch((e: unknown) => {
-    emit({ step: "seed-ccip", status: "failed", title: "CCIP transfer failed (non-fatal)", revertReason: e instanceof Error ? e.message : String(e) });
-  });
+  if (both || args.flags.has("weakbridge")) await weakBridgeRoundTrip(ctx, emit, amount);
+  if (both || args.flags.has("ccip")) {
+    if (ctx.net.name === "local") {
+      emit({ step: "ccip", status: "skipped", title: "no CCIP Router on Anvil" });
+    } else {
+      // Round trip (PRD section 17 scenario 1): home -> arb fills the home ERC20LockBox, then the Flow A leg
+      // arb -> home releases from it. Each leg is a real CCIP message through the KirchhoffTokenPools.
+      await ensureDeployerKeth(ctx, amount);
+      const out = await ccipTransfer(ctx, emit, "home", "arb", amount);
+      if (out.execution?.state !== "SUCCESS") throw new Error(`home -> arb leg not executed (${out.execution?.state ?? "pending"}); Flow A needs its lockbox liquidity`);
+      await ccipTransfer(ctx, emit, "arb", "home", amount);
+    }
+  }
   emit({ step: "seed", status: "ok", title: "seed complete" });
 }
 

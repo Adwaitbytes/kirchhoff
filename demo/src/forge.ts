@@ -47,7 +47,8 @@ const tail = (text: string, lines = 25): string => text.trim().split("\n").slice
 
 export type ScriptOptions = {
   script: "script/Deploy.s.sol" | "script/ConfigureLanes.s.sol";
-  rpcUrl: string;
+  /** Providers in order; a run that hits a rate limit or a lost nonce race is retried on the next one. */
+  rpcUrls: readonly string[];
   env: Record<string, string>;
   broadcast: boolean;
   /** Etherscan V2 verification during broadcast (one key covers all three testnets). */
@@ -58,13 +59,32 @@ export type ScriptOptions = {
 
 export type ScriptResult = RunResult & { estimatedGas: bigint | null; estimatedEth: string | null };
 
+const RETRYABLE = /nonce|rate limit|exceeds defined limit|429|too many requests|timed out|connection reset/i;
+
 export async function forgeScript(o: ScriptOptions): Promise<ScriptResult> {
-  const args = ["script", o.script, "--rpc-url", o.rpcUrl, "-vv"];
-  if (o.broadcast) args.push("--broadcast", "--slow");
-  if (o.verify !== undefined) args.push("--verify", "--verifier", "etherscan", "--etherscan-api-key", o.verify.etherscanApiKey, "--retries", "6", "--delay", "12");
-  if (o.gasPrice !== undefined) args.push("--with-gas-price", o.gasPrice.max.toString(), "--priority-gas-price", o.gasPrice.priority.toString());
-  log(`forge ${args.map((a) => (a === o.rpcUrl || a === o.verify?.etherscanApiKey ? "***" : a)).join(" ")} (${o.env.NETWORK ?? ""})`);
-  const result = await run("forge", args, { cwd: CONTRACTS_ROOT, env: o.env, echo: true });
+  const build = (rpcUrl: string): string[] => {
+    const args = ["script", o.script, "--rpc-url", rpcUrl, "-vv"];
+    if (o.broadcast) args.push("--broadcast", "--slow");
+    if (o.verify !== undefined) args.push("--verify", "--verifier", "etherscan", "--etherscan-api-key", o.verify.etherscanApiKey, "--retries", "6", "--delay", "12");
+    if (o.gasPrice !== undefined) args.push("--with-gas-price", o.gasPrice.max.toString(), "--priority-gas-price", o.gasPrice.priority.toString());
+    return args;
+  };
+  // Deploy.s.sol and ConfigureLanes.s.sol are idempotent (recorded addresses with code are reused, every config step
+  // checks onchain state), so a run that was rate limited or lost a nonce race only does what is still missing.
+  let result: RunResult | undefined;
+  const attempts = Math.max(3, o.rpcUrls.length * 2);
+  for (let attempt = 1; result === undefined; attempt++) {
+    const rpcUrl = o.rpcUrls[(attempt - 1) % o.rpcUrls.length] ?? "";
+    const args = build(rpcUrl);
+    log(`forge ${args.map((a) => (a === rpcUrl ? `<rpc ${new URL(rpcUrl).host}>` : a === o.verify?.etherscanApiKey ? "***" : a)).join(" ")} (${o.env.NETWORK ?? ""})`);
+    try {
+      result = await run("forge", args, { cwd: CONTRACTS_ROOT, env: o.env, echo: true });
+    } catch (e) {
+      if (attempt >= attempts || !(e instanceof ProcessError) || !RETRYABLE.test(e.message)) throw e;
+      log(`forge attempt ${attempt} failed transiently (${/rate limit|exceeds defined limit|429/i.test(e.message) ? "rate limit" : "nonce/timeout"}), retrying on the next provider`);
+      await new Promise((r) => setTimeout(r, 5_000));
+    }
+  }
   const gas = /Estimated total gas used for script:\s*(\d+)/.exec(result.stdout)?.[1];
   const eth = /Estimated amount required:\s*([\d.]+)\s*ETH/.exec(result.stdout)?.[1];
   return { ...result, estimatedGas: gas === undefined ? null : BigInt(gas), estimatedEth: eth ?? null };

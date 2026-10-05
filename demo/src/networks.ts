@@ -1,5 +1,5 @@
 import type { Address } from "viem";
-import { ConfigError, required, optional } from "./env.ts";
+import { ConfigError, optional } from "./env.ts";
 
 export type NetworkName = "local" | "testnet";
 export type ChainRole = "home" | "arb" | "base";
@@ -12,7 +12,10 @@ export type ChainConfig = {
   label: string;
   chainId: number;
   selector: bigint;
+  /** Primary RPC (provider 1). */
   rpcUrl: string;
+  /** Every configured provider, in preference order; sends and forge broadcasts fall back across them. */
+  rpcUrls: readonly string[];
   /** Block explorer base for tx / address links; null on Anvil. */
   explorer: string | null;
   blockscout: { api: string; web: string } | null;
@@ -50,6 +53,7 @@ function local(): Network {
     chainId,
     selector: SELECTOR[role],
     rpcUrl: optional(`LOCAL_RPC_${role.toUpperCase()}`) ?? `http://127.0.0.1:${port}`,
+    rpcUrls: [optional(`LOCAL_RPC_${role.toUpperCase()}`) ?? `http://127.0.0.1:${port}`],
     explorer: null,
     blockscout: null,
     ccip: null,
@@ -65,6 +69,19 @@ function local(): Network {
   };
 }
 
+/** Public keyless providers, used only when .env names none (clean clones, CI, unit tests). */
+const PUBLIC_RPC = {
+  ETH: "https://ethereum-sepolia-rpc.publicnode.com",
+  ARB: "https://arbitrum-sepolia-rpc.publicnode.com",
+  BASE: "https://base-sepolia-rpc.publicnode.com",
+} as const;
+
+/** Provider 1 and 2 from .env (the Judge's two independent providers), else the public endpoint. */
+function providers(chain: "ETH" | "ARB" | "BASE"): string[] {
+  const urls = [optional(`RPC_${chain}_SEPOLIA_1`), optional(`RPC_${chain}_SEPOLIA_2`)].filter((u): u is string => u !== undefined);
+  return urls.length > 0 ? urls : [PUBLIC_RPC[chain]];
+}
+
 function testnet(): Network {
   return {
     name: "testnet",
@@ -75,7 +92,8 @@ function testnet(): Network {
         label: "Ethereum Sepolia",
         chainId: 11_155_111,
         selector: SELECTOR.home,
-        rpcUrl: required("RPC_ETH_SEPOLIA_1"),
+        rpcUrl: providers("ETH")[0] ?? PUBLIC_RPC.ETH,
+        rpcUrls: providers("ETH"),
         explorer: "https://sepolia.etherscan.io",
         blockscout: { api: optional("BLOCKSCOUT_ETH_SEPOLIA_URL") ?? "https://eth-sepolia.blockscout.com/api", web: "https://eth-sepolia.blockscout.com" },
         ccip: {
@@ -91,7 +109,8 @@ function testnet(): Network {
         label: "Arbitrum Sepolia",
         chainId: 421_614,
         selector: SELECTOR.arb,
-        rpcUrl: required("RPC_ARB_SEPOLIA_1"),
+        rpcUrl: providers("ARB")[0] ?? PUBLIC_RPC.ARB,
+        rpcUrls: providers("ARB"),
         explorer: "https://sepolia.arbiscan.io",
         blockscout: { api: optional("BLOCKSCOUT_ARB_SEPOLIA_URL") ?? "https://arbitrum-sepolia.blockscout.com/api", web: "https://arbitrum-sepolia.blockscout.com" },
         ccip: {
@@ -107,7 +126,8 @@ function testnet(): Network {
         label: "Base Sepolia",
         chainId: 84_532,
         selector: SELECTOR.base,
-        rpcUrl: required("RPC_BASE_SEPOLIA_1"),
+        rpcUrl: providers("BASE")[0] ?? PUBLIC_RPC.BASE,
+        rpcUrls: providers("BASE"),
         explorer: "https://sepolia.basescan.org",
         blockscout: { api: optional("BLOCKSCOUT_BASE_SEPOLIA_URL") ?? "https://base-sepolia.blockscout.com/api", web: "https://base-sepolia.blockscout.com" },
         ccip: {
@@ -139,5 +159,5 @@ export function addressUrl(chain: ChainConfig, address: string): string | null {
 }
 
 export function ccipMessageUrl(messageId: string): string {
-  return `https://ccip.chain.link/#/side-drawer/msg/${messageId}`;
+  return `https://ccip.chain.link/msg/${messageId}`;
 }

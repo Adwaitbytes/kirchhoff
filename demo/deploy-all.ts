@@ -10,7 +10,9 @@
  */
 import { formatEther } from "viem";
 import { addressUrl } from "./src/networks.ts";
-import { account, connect, fundIfBelow, type Chain } from "./src/chain.ts";
+import { account, connect, fundIfBelow, HOME_TESTNET_FEE, type Chain } from "./src/chain.ts";
+import { verifyAll } from "./src/verify.ts";
+import { activateSpec, specParameters } from "./src/spec.ts";
 import { parseArgs, main } from "./src/cli.ts";
 import { connectAll, checkChainIds, loadContext } from "./src/context.ts";
 import { genConfig } from "./src/cre.ts";
@@ -26,7 +28,9 @@ import {
   readState,
   type DeploymentSet,
 } from "./src/deployments.ts";
-import { required } from "./src/env.ts";
+import { privateKey, required } from "./src/env.ts";
+import { installLocalInfra, mineLocal, simulatorForwarder } from "./src/local.ts";
+import { privateKeyToAccount } from "viem/accounts";
 import { log, stepEmitter } from "./src/events.ts";
 import { forgeScript } from "./src/forge.ts";
 import { network, ROLES, type ChainRole, type Network } from "./src/networks.ts";
@@ -35,11 +39,11 @@ import { seedAll } from "./src/supply.ts";
 import { toHex } from "viem";
 
 const REGISTRY_TIMELOCK_SECONDS = "600"; // testnet demo minimum (contracts README)
-const RECOVERY_TIMELOCK_SECONDS = "60"; // short recovery window so reset stays under 3 minutes (task brief)
 
-async function deployChain(net: Network, role: ChainRole, safe: string, verify: boolean): Promise<void> {
+async function deployChain(net: Network, role: ChainRole, safe: string): Promise<void> {
   const config = net.chains[role];
   const isLocal = net.name === "local";
+  const params = specParameters();
   const env: Record<string, string> = {
     NETWORK: forgeNetwork(net.name, role),
     ROLE: role === "home" ? "home" : "remote",
@@ -47,37 +51,33 @@ async function deployChain(net: Network, role: ChainRole, safe: string, verify: 
     WEAKBRIDGE_VERIFIER: required("WEAKBRIDGE_VERIFIER_ADDRESS"),
     DEPLOYER_PRIVATE_KEY: required("DEPLOYER_PRIVATE_KEY"),
     REGISTRY_TIMELOCK_SECONDS,
-    RECOVERY_TIMELOCK_SECONDS,
-    STALENESS_SECONDS: "120",
+    // Owned by the KIRCH-SPEC (engine/specs/kETH.yaml), never by env. One-shot at token configuration: an existing
+    // deployment keeps what it was configured with (the issuer Safe can change it later).
+    RECOVERY_TIMELOCK_SECONDS: params.recoveryTimelockSeconds.toString(),
+    STALENESS_SECONDS: params.stalenessSeconds.toString(),
   };
-  if (!isLocal) env.FORWARDER_MODE = "simulation";
-  const chain = connect(config);
-  const fee = await (async () => {
-    const block = await chain.client.getBlock({ blockTag: "latest" });
-    const base = block.baseFeePerGas ?? (await chain.client.getGasPrice());
-    return { max: (base * 2n) + 1_000_000n, priority: isLocal ? 1_000_000_000n : 10_000_000n };
-  })();
+  if (isLocal) env.KEYSTONE_FORWARDER = simulatorForwarder(role);
+  else env.FORWARDER_MODE = "simulation";
   await forgeScript({
     script: "script/Deploy.s.sol",
-    rpcUrl: config.rpcUrl,
+    rpcUrls: config.rpcUrls,
     env,
     broadcast: true,
-    ...(verify && !isLocal ? { verify: { etherscanApiKey: required("ETHERSCAN_API_KEY") } } : {}),
-    ...(isLocal ? {} : { gasPrice: fee }),
+    ...(isLocal ? {} : { gasPrice: await testnetFee(connect(config)) }),
   });
   // Deploy.s.sol writes <forgeNetwork>.json; it already carries ccipOnRamp/offRamp via the address book only on
   // testnet. Inject the real 2.0.0 ramps (and local placeholders) so the engine schema always has them.
   injectRamps(net, role);
 }
 
-/** Adds ccipOnRamp / ccipOffRamp to the raw record (testnet: real 2.0.0 ramps; local: the deployer stands in). */
+/** Adds ccipOnRamp / ccipOffRamp to the raw record (testnet: real 2.0.0 ramps; local: the LocalRouterMock). */
 function injectRamps(net: Network, role: ChainRole): void {
   const raw = readRaw(net.name, role);
   if (raw === null) throw new Error(`forge wrote no record for ${role}`);
   const config = net.chains[role];
-  const deployer = account("DEPLOYER").address;
-  raw.ccipOnRamp = config.ccip?.onRamp ?? deployer;
-  raw.ccipOffRamp = config.ccip?.offRamp ?? deployer;
+  const router = String(raw.ccipRouter);
+  raw.ccipOnRamp = config.ccip?.onRamp ?? router;
+  raw.ccipOffRamp = config.ccip?.offRamp ?? router;
   writeJson(rawPath(net.name, role), raw);
 }
 
@@ -86,7 +86,7 @@ async function wireLanes(net: Network, role: ChainRole): Promise<void> {
   const remotes = ROLES.filter((r) => r !== role).map((r) => forgeNetwork(net.name, r));
   await forgeScript({
     script: "script/ConfigureLanes.s.sol",
-    rpcUrl: config.rpcUrl,
+    rpcUrls: config.rpcUrls,
     env: {
       NETWORK: forgeNetwork(net.name, role),
       REMOTE_NETWORKS: remotes.join(","),
@@ -98,6 +98,7 @@ async function wireLanes(net: Network, role: ChainRole): Promise<void> {
 }
 
 async function testnetFee(chain: Chain): Promise<{ max: bigint; priority: bigint }> {
+  if (chain.config.role === "home") return { max: HOME_TESTNET_FEE.maxFeePerGas, priority: HOME_TESTNET_FEE.maxPriorityFeePerGas };
   const block = await chain.client.getBlock({ blockTag: "latest" });
   const base = block.baseFeePerGas ?? (await chain.client.getGasPrice());
   return { max: base * 2n + 1_000_000n, priority: 10_000_000n };
@@ -118,6 +119,10 @@ async function run(): Promise<void> {
 
   const chains = connectAll(net);
   await checkChainIds(chains);
+  if (net.name === "local") {
+    // Simulator forwarders + Multicall3, and gas for the CRE simulation key (workflows/scripts/lib/local.ts).
+    await installLocalInfra([account("DEPLOYER").address, account("ATTACKER").address, privateKeyToAccount(privateKey("CRE_ETH_PRIVATE_KEY")).address]);
+  }
 
   // 1. Issuer Safe (same address on all three chains).
   let safeAddress = "";
@@ -132,7 +137,7 @@ async function run(): Promise<void> {
 
   // 2. Deploy the suite per chain, then wire lanes once all three exist.
   for (const role of ROLES) {
-    await deployChain(net, role, safeAddress, verify);
+    await deployChain(net, role, safeAddress);
     emit({ step: "deploy", status: "ok", chain: role, title: `${net.chains[role].label} suite deployed` });
   }
   const set = loadSet(net.name);
@@ -155,17 +160,28 @@ async function run(): Promise<void> {
     const sents = await seedAll(seedCtx);
     emit({ step: "seed", status: "ok", title: "seeded 250k escrow / 180k arb / 70k base", detail: { txs: sents.length } });
   }
+  if (net.name === "local") await mineLocal();
 
   // 5. Save demo state (Safe parameters for reset).
   const state = readState(net.name);
   state.safe = { address: safeAddress as `0x${string}`, owners: ownerAddresses(), threshold: SAFE_THRESHOLD, saltNonce: toHex(SAFE_SALT_NONCE, { size: 32 }), singleton: SAFE.singletonL2, factory: SAFE.factory, fallbackHandler: SAFE.fallbackHandler };
   writeState(state);
 
-  // 6. Top up the attacker and CRE signer minimally for the demo (testnet only).
+  // 6. PRD section 6 spec lifecycle: Safe proposes, registry timelock, permissionless activate (idempotent). Without an
+  //    active spec the Judge answers UNKNOWN_TOKEN for every kETH message.
+  await activateSpec(await loadContext(net.name), emit);
+
+  // 7. Verify every deployed contract on Etherscan V2 and Blockscout (testnet, free).
+  if (net.name === "testnet" && verify) await verifyAll(net, emit);
+
+  // 8. Strict-minimum gas for the attacker's own demo txs (testnet). The Safe owners sign offchain and the deployer
+  //    relays, so they need none. Home budget: forged credit ~150k + 3 expected reverts reserved at 400k each, sent
+  //    one at a time + the reset's return transfer ~60k, at the 1.3 gwei cap.
   if (net.name === "testnet") {
+    const target: Record<ChainRole, bigint> = { home: 1_200_000_000_000_000n, arb: 100_000_000_000_000n, base: 100_000_000_000_000n };
     for (const role of ROLES) {
-      const chain = chains[role];
-      await fundIfBelow(chain, account("ATTACKER").address, 1_000_000_000_000_000n, 2_000_000_000_000_000n, `attacker on ${role}`).catch(() => null);
+      const sent = await fundIfBelow(chains[role], account("ATTACKER").address, target[role], target[role], `attacker on ${role}`);
+      if (sent !== null) emit({ step: "fund", status: "ok", chain: role, title: `attacker funded to ${formatEther(target[role])} ETH`, txHash: sent.hash, explorerUrl: sent.url });
     }
   }
 

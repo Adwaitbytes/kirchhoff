@@ -12,7 +12,9 @@
     "e2e": "tsx e2e.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "verify": "tsx verify.ts",
+    "spec": "tsx spec-activate.ts"
   },
   "dependencies": {
     "@kirchhoff/engine": "workspace:*",

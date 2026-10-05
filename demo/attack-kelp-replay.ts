@@ -14,7 +14,9 @@
 import { main, parseArgs, reportMode } from "./src/cli.ts";
 import { loadContext } from "./src/context.ts";
 import { stepEmitter } from "./src/events.ts";
-import { attemptRefusals, driveContainment, forgeRelease, hookPayload } from "./src/attack.ts";
+import { attemptRefusals, baselineEpoch, deficitEpoch, driveContainment, forgeRelease, hookPayload, refusalBlock } from "./src/attack.ts";
+import { ledgerStatus } from "./src/reset.ts";
+import { Status } from "@kirchhoff/engine";
 import { writeState, readState } from "./src/deployments.ts";
 
 async function run(): Promise<void> {
@@ -25,11 +27,14 @@ async function run(): Promise<void> {
   const emit = stepEmitter(ctx.net.name);
   emit({ step: "attack", status: "started", title: "Kelp Replay (Testnet simulation)", detail: { reports: mode, broadcast } });
 
+  // A fresh deployment starts UNKNOWN: give it the W2 baseline epoch so the demo opens on CONSERVED.
+  if ((await ledgerStatus(ctx, "home")).status === Status.UNKNOWN) await baselineEpoch(ctx, emit, mode);
   const release = await forgeRelease(ctx, emit);
   await driveContainment(ctx, emit, mode, release);
   const refusals = await attemptRefusals(ctx, emit, broadcast);
+  await deficitEpoch(ctx, emit, mode, release);
 
-  const payload = hookPayload(ctx, release);
+  const payload = hookPayload(ctx, release, await refusalBlock(ctx, refusals.ccipPool ?? refusals.ccip));
   emit({ step: "judge-replay-payload", status: "ok", title: "policy-hook v1 payload for the Judge replay path", detail: { messageId: String(payload.message_id) } });
   process.stdout.write(`${JSON.stringify({ label: "Testnet simulation", step: "hook-payload", payload })}\n`);
 
@@ -41,7 +46,7 @@ async function run(): Promise<void> {
     step: "attack",
     status: "ok",
     title: "Kelp Replay complete: released, contained, every onward move refused",
-    detail: { incidentId: release.incidentId, ccip: refusals.ccip.reason, guard: refusals.guard.reason, borrow: refusals.borrow.reason },
+    detail: { incidentId: release.incidentId, ccip: refusals.ccip.reason, ccipPool: refusals.ccipPool?.reason ?? null, guard: refusals.guard.reason, borrow: refusals.borrow.reason },
   });
 }
 

@@ -6,6 +6,7 @@ import {
   decodeErrorResult,
   defineChain,
   encodeFunctionData,
+  fallback,
   formatEther,
   http,
   type Abi,
@@ -14,6 +15,7 @@ import {
   type Hex,
   type PublicClient,
   type TransactionReceipt,
+  type Transport,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { errorAbi } from "./abi.ts";
@@ -36,8 +38,17 @@ export function connect(config: ChainConfig): Chain {
     nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
     rpcUrls: { default: { http: [config.rpcUrl] } },
   });
-  const client = createPublicClient({ chain, transport: http(config.rpcUrl, { retryCount: 3, timeout: 30_000 }) });
+  const client = createPublicClient({ chain, transport: transport(config) });
   return { config, client, local: config.explorer === null };
+}
+
+/**
+ * Fallback across the configured providers: a rate-limited gateway (Tenderly rejects bursts of
+ * eth_sendRawTransaction) hands the request to the next provider instead of failing the run.
+ */
+function transport(config: ChainConfig): Transport {
+  const each = config.rpcUrls.map((url) => http(url, { retryCount: 2, retryDelay: 1_000, timeout: 30_000 }));
+  return each.length === 1 && each[0] !== undefined ? each[0] : fallback(each);
 }
 
 export class TxError extends Error {
@@ -45,10 +56,17 @@ export class TxError extends Error {
 }
 
 /**
- * Fee policy for small testnet budgets: priority tip is tiny (testnets include it fine), max fee is 1.5x the current
- * base fee, so a spike delays a transaction instead of overpaying for it.
+ * Ethereum Sepolia budget cap (lead decision): fixed maxFeePerGas 1.3 gwei, tip 0.01 gwei. A base-fee spike above
+ * the cap stalls a transaction until the fee drops (every script is idempotent), it never overpays.
+ */
+export const HOME_TESTNET_FEE = { maxFeePerGas: 1_300_000_000n, maxPriorityFeePerGas: 10_000_000n } as const;
+
+/**
+ * Fee policy for small testnet budgets: the fixed cap on Ethereum Sepolia; elsewhere a tiny tip and 1.5x the
+ * current base fee, so a spike delays a transaction instead of overpaying for it.
  */
 export async function fees(chain: Chain): Promise<{ maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }> {
+  if (!chain.local && chain.config.role === "home") return { ...HOME_TESTNET_FEE };
   const block = await chain.client.getBlock({ blockTag: "latest" });
   const base = block.baseFeePerGas ?? (await chain.client.getGasPrice());
   const tip = chain.local ? 1_000_000_000n : 10_000_000n;
@@ -102,7 +120,7 @@ export async function sendRaw(
   tx: { to: Address | null; data: Hex; value?: bigint; gas?: bigint },
   label: string,
 ): Promise<Sent> {
-  const wallet = createWalletClient({ account: from, chain: chain.client.chain, transport: http(chain.config.rpcUrl) });
+  const wallet = createWalletClient({ account: from, chain: chain.client.chain, transport: transport(chain.config) });
   const gas =
     tx.gas ??
     ((await chain.client.estimateGas({ account: from, ...(tx.to === null ? {} : { to: tx.to }), data: tx.data, value: tx.value ?? 0n })) * 12n) / 10n;

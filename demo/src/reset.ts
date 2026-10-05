@@ -4,7 +4,8 @@ import { account, read, send } from "./chain.ts";
 import { type Context } from "./context.ts";
 import { readState } from "./deployments.ts";
 import { log, type stepEmitter } from "./events.ts";
-import { genConfig, simulate } from "./cre.ts";
+import { emitWrites } from "./attack.ts";
+import { runWorkflow, settle } from "./engine-run.ts";
 import { ROLES, type ChainRole } from "./networks.ts";
 import { nextEpochId, recoveryBody, writeReportDirect } from "./reports.ts";
 import { execSafe } from "./safe.ts";
@@ -23,6 +24,39 @@ export async function ledgerStatus(ctx: Context, role: ChainRole): Promise<{ sta
   const recoveryEndsAt = await read<bigint>(chain, { to: ledger, abi: ledgerAbi, functionName: "recoveryEndsAt", args: [ctx.tokenId] });
   const frozen = await read<boolean>(chain, { to: ctx.at(role, "quarantineController"), abi: quarantineAbi, functionName: "isFrozen", args: [ctx.tokenId] });
   return { status, incident, recoveryEndsAt, frozen };
+}
+
+/**
+ * Blocks until every ledger's recoveryEndsAt has passed on its chain. Testnets: real waiting. Anvil only: the three
+ * clocks are fast-forwarded together (evm_increaseTime), keeping them in sync for W1's cross-chain time checks.
+ */
+async function waitRecoveryTimelock(ctx: Context, emit: Emit): Promise<void> {
+  const remaining = async (): Promise<bigint> => {
+    let worst = 0n;
+    for (const role of ROLES) {
+      const { recoveryEndsAt } = await ledgerStatus(ctx, role);
+      if (recoveryEndsAt === 0n) continue;
+      const now = (await ctx.chains[role].client.getBlock({ blockTag: "latest" })).timestamp;
+      if (recoveryEndsAt - now > worst) worst = recoveryEndsAt - now;
+    }
+    return worst;
+  };
+  let left = await remaining();
+  if (left <= 0n) return;
+  if (ctx.net.name === "local") {
+    emit({ step: "timelock", status: "started", title: `Anvil: fast-forwarding all three clocks ${left + 1n}s past the recovery timelock` });
+    for (const chain of Object.values(ctx.chains)) {
+      await chain.client.request({ method: "evm_increaseTime" as never, params: [Number(left + 1n)] as never });
+      await chain.client.request({ method: "evm_mine" as never, params: [] as never });
+    }
+  } else {
+    emit({ step: "timelock", status: "started", title: `waiting ${left}s recovery timelock` });
+    while (left > 0n) {
+      await sleep(Math.min(Number(left) * 1000 + 2000, 30_000));
+      left = await remaining();
+    }
+  }
+  emit({ step: "timelock", status: "ok", title: "recovery timelock elapsed" });
 }
 
 /** Restores all three chains to CONSERVED and returns the elapsed milliseconds (PRD recording checklist, <3 min). */
@@ -49,32 +83,7 @@ export async function resetAll(ctx: Context, emit: Emit, mode: ReportMode): Prom
     endsAt.push((await ledgerStatus(ctx, role)).recoveryEndsAt);
   }
 
-  if (endsAt.length > 0) {
-    const until = endsAt.reduce((a, b) => (a > b ? a : b), 0n);
-    const waitMs = Number(until) * 1000 - Date.now() + 2000;
-    if (waitMs > 0) {
-      emit({ step: "timelock", status: "started", title: `waiting ${Math.ceil(waitMs / 1000)}s recovery timelock` });
-      await sleep(waitMs);
-    }
-    emit({ step: "timelock", status: "ok", title: "recovery timelock elapsed" });
-  }
-
-  if (mode === "cre" && endsAt.length > 0) await genConfig(ctx.net.name).catch(() => undefined);
-  for (const role of ROLES) {
-    const s = await ledgerStatus(ctx, role);
-    if (s.status !== Status.RECOVERING) {
-      emit({ step: "recovery-check", status: "skipped", chain: role, title: `${role} not RECOVERING (status ${s.status})` });
-      continue;
-    }
-    if (mode === "cre") {
-      await simulate({ workflow: "w2-loop", net: ctx.net.name, triggerIndex: 0, broadcast: true });
-      emit({ step: "recovery-check", status: "ok", chain: role, title: `RECOVERY_CHECK via CRE on ${role}` });
-    } else {
-      const sent = await writeReportDirect(ctx, role, recoveryBody(await nextEpochId(ctx, role)), 4);
-      emit({ step: "recovery-check", status: "ok", chain: role, title: `RECOVERY_CHECK cleared ${role} to CONSERVED`, txHash: sent.hash, explorerUrl: sent.url });
-    }
-  }
-
+  // 2. Issuer Safe clears the attacker taint, so the stolen kETH can move again (KirchhoffGuard).
   const attacker = account("ATTACKER").address;
   for (const role of ROLES) {
     const tainted = await read<boolean>(ctx.chains[role], { to: ctx.at(role, "quarantineController"), abi: quarantineAbi, functionName: "isTainted", args: [ctx.tokenId, attacker] });
@@ -83,14 +92,37 @@ export async function resetAll(ctx: Context, emit: Emit, mode: ReportMode): Prom
     emit({ step: "untaint", status: "ok", chain: role, title: `attacker untainted on ${role}`, txHash: sent.hash, explorerUrl: sent.url });
   }
 
-  const home = ctx.chains.home;
+  // 3. Rebalance before the recovery check: RECOVERY_CHECK needs Δ >= 0, so the stolen kETH goes back to the escrow
+  //    (demo admin path; the attacker key is ours). Δ returns to 0.
   const escrow = ctx.at("home", "homeEscrowAdapter");
   const stolen = await balanceOf(ctx, "home", attacker);
   if (stolen > 0n) {
-    const sent = await send(home, account("ATTACKER"), { to: ctx.at("home", "kETH"), abi: erc20Abi, functionName: "transfer", args: [escrow, stolen] }, `return ${stolen} kETH to escrow`);
+    const sent = await send(ctx.chains.home, account("ATTACKER"), { to: ctx.at("home", "kETH"), abi: erc20Abi, functionName: "transfer", args: [escrow, stolen] }, `return ${stolen} kETH to escrow`);
     emit({ step: "rebalance", status: "ok", chain: "home", title: `returned ${stolen} kETH to escrow; Δ back to 0`, txHash: sent.hash, explorerUrl: sent.url });
   } else {
     emit({ step: "rebalance", status: "skipped", chain: "home", title: "attacker holds no kETH" });
+  }
+
+  // 4. Wait out the recovery timelock, measured on each chain's own clock (Anvil clocks can run ahead of wall time).
+  if (endsAt.length > 0) await waitRecoveryTimelock(ctx, emit);
+
+  // 5. RECOVERY_CHECK clears each RECOVERING ledger to CONSERVED. CRE: one W2 run writes it to every chain. Locally
+  //    the chains are mined past the finalized pin and past W2's 2 x 100-block windows, so the attack's forged
+  //    credit is history, not in-flight value.
+  const recovering: ChainRole[] = [];
+  for (const role of ROLES) if ((await ledgerStatus(ctx, role)).status === Status.RECOVERING) recovering.push(role);
+  if (recovering.length > 0 && mode === "cre") {
+    // Every chain's resolve and the home rebalance must be final before W2 (it reads ledgers and balances at the
+    // finalized pin). Anvil: also mine past W2's 2 x 100-block windows.
+    await settle(ctx, ROLES, 300);
+    const w2 = await runWorkflow(ctx, "w2-loop", 0);
+    emitWrites(emit, "recovery-check", w2);
+    emit({ step: "recovery-check", status: "ok", title: `W2 RECOVERY_CHECK via CRE on ${recovering.join(", ")}`, detail: { result: w2.result.result } });
+  } else {
+    for (const role of recovering) {
+      const sent = await writeReportDirect(ctx, role, recoveryBody(await nextEpochId(ctx, role)), 4);
+      emit({ step: "recovery-check", status: "ok", chain: role, title: `RECOVERY_CHECK cleared ${role} to CONSERVED`, txHash: sent.hash, explorerUrl: sent.url });
+    }
   }
 
   for (const role of ROLES) {

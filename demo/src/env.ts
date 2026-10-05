@@ -32,11 +32,15 @@ export function parseDotEnv(text: string): Record<string, string> {
 
 let cached: Record<string, string> | undefined;
 
-/** Repo-root .env merged under the real environment (process env wins). Values are never logged. */
+/**
+ * Repo-root .env merged under the real environment (process env wins). Values are never logged.
+ * KIRCHHOFF_DOTENV points at another file, or `none` to read no file at all (what a clean clone or CI sees).
+ */
 export function env(): Record<string, string> {
   if (cached !== undefined) return cached;
-  const path = join(REPO_ROOT, ".env");
-  const file = existsSync(path) ? parseDotEnv(readFileSync(path, "utf8")) : {};
+  const override = process.env.KIRCHHOFF_DOTENV;
+  const path = override === undefined || override === "" ? join(REPO_ROOT, ".env") : override;
+  const file = override !== "none" && existsSync(path) ? parseDotEnv(readFileSync(path, "utf8")) : {};
   const merged: Record<string, string> = { ...file };
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined && v !== "") merged[k] = v;
   cached = merged;
