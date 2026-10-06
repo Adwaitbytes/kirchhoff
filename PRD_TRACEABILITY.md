@@ -2,7 +2,11 @@
 
 Every requirement in [docs/PRD.md](docs/PRD.md), sections 1 to 20, mapped to code, test and status.
 Audited 2026-10-05 against the working tree (including uncommitted files) by reading and grepping the code, running
-the test suites, and reading testnet state with `cast call`.
+the test suites, and reading testnet state with `cast call`. Re-audited 2026-10-06 at commit `6ad7ab8` plus the
+working tree by reading and grepping the code, the commit log since `d9437b1`, the green GitHub CI run
+[37393797827](https://github.com/Adwaitbytes/kirchhoff/actions/runs/37393797827), `workflows/SIMULATION_LOG.md`,
+`demo/logs/*.log`, the local Playwright report, and testnet state with `cast call` / `cast logs`. No suite was re-run
+locally for the re-audit.
 
 **Statuses**
 
@@ -12,15 +16,16 @@ the test suites, and reading testnet state with `cast call`.
 - **PENDING**: not finished; the row says what remains. Rows whose note starts with **Roadmap** are post-hackathon
   by design in the PRD itself (12-month goals, v1 adapters, section 18), not hackathon work.
 
-**Evidence baseline (measured 2026-10-05)**
+**Evidence baseline (2026-10-05 local runs, updated 2026-10-06 from CI and recorded logs)**
 
 | Command | Result |
 | --- | --- |
-| `pnpm -r --no-bail test` | engine 249, workflows 35, judge 96 (+3 skipped, need `JUDGE_LIVE=1`), ai 33, api 20, indexer 8, sdk 8, mcp 6, demo 8 passed; web typecheck passes; exit 0 |
-| `pnpm --filter @kirchhoff/engine coverage` | 100% statements 894/894, branches 586/586, functions 203/203, lines 736/736 |
-| `cd contracts && forge test` | 150 passed, 0 failed, 10 suites |
+| `pnpm -r test` (CI run 37393797827, commit `6ad7ab8`, Postgres 17 service) | engine 251, workflows 54, judge 96 (+3 skipped, need `JUDGE_LIVE=1`), ai 33, api 28, indexer 10, sdk 8, mcp 6, demo 8 passed (494 passed) |
+| `pnpm --filter @kirchhoff/engine coverage` | 100% on all four columns (CI run 37393797827); 2026-10-05 local run: statements 894/894, branches 586/586, functions 203/203, lines 736/736 |
+| `cd contracts && forge test` | 150 passed, 0 failed, 10 suites (CI run 37393797827) |
+| Playwright `web/e2e` (local report, 2026-10-06) | 124 / 124 passed, incl. axe WCAG 2.2 AA on 11 routes in both themes and keyboard suites |
 | `bash scripts/no-ai-in-veto-path.sh` | OK |
-| `cast call <ledger> statusOf(kETH)` on all 3 testnets | `UNKNOWN`, no epoch yet; `KirchhoffRegistry.activeSpecHash(kETH)` = 0 |
+| `cast call <ledger> statusOf(kETH)` on all 3 testnets | 2026-10-05: `UNKNOWN`. 2026-10-06: spec `0x22c75309...5dfe` active; ledgers went CONSERVED (first EPOCH), BROKEN (Loop BREACH, Δ -116,500 kETH), QUARANTINED, RECOVERING, then CONSERVED again (`cast logs StatusChanged`, `demo/logs/testnet-reset0.log`) |
 | Etherscan V2 `getsourcecode` for every testnet contract | all verified; Arbitrum Sepolia `ConservationFeed` verified on Blockscout only |
 | `cre whoami` | logged in, `Deploy Access: Not enabled` |
 
@@ -33,16 +38,17 @@ Abbreviations: `SIM_LOG` = `workflows/SIMULATION_LOG.md`; `CL` = `contracts/src/
 
 | Status | Count |
 | --- | --- |
-| DONE | 350 |
+| DONE | 378 |
 | FALLBACK | 17 |
 | CUT | 6 |
-| PENDING (hackathon work remaining) | 77 |
+| PENDING (hackathon work remaining) | 49 |
 | PENDING (Roadmap, post-hackathon by design) | 16 |
 | **Total requirements** | **466** |
 
 Unmapped requirements: 0. Every row carries exactly one of the four statuses (the counting commands at the end
 sum to the row count). The 6 CUT rows all trace to cut list items 4 (LayerZero adapter) and 5 (4-cell committee);
-items 1 to 3, 6 and 7 were not cut.
+items 1 to 3, 6 and 7 were not cut. Demo video and deck work is paused by the product owner: those rows stay
+PENDING with the note "Deferred by product owner", never CUT.
 
 Counts are produced from this file by `grep -c` on the status column (see the end of the file).
 
@@ -57,7 +63,7 @@ Counts are produced from this file by `grep -c` on the status column (see the en
 | 1.R3 | Quarantine: excess frozen on the infected chain; clean chains keep working | `contracts/src/QuarantineController.sol`, `workflows/src/w3.ts` | CLt `test_breach_fromConservedSetsBrokenAndContains`, `test_quarantine_fromBroken`; SIM_LOG scenario 3 | DONE | Lanes for the token freeze and the recipient is tainted; untainted holders keep transferring (Guard blocks only tainted senders) |
 | 1.R4 | Mission Control: live ledger UI of every chain, the invariant and every verdict | `web/components/mission/*` | MCs (10 tests) | DONE | Public deployment tracked in 15.SUB2 |
 | 1.R5 | Spec Copilot turns plain English into a machine-checked spec; AI never in the veto path | `ai/src/copilot/*`, `scripts/no-ai-in-veto-path.sh` | `ai/test/copilot.int.test.ts`; `ai/eval/RESULTS.md` sections 1-2 | DONE | |
-| 1.R6 | Kelp Replay: scripted forged-message attack that fails | `demo/attack-kelp-replay.ts`, `demo/src/attack.ts` | SIM_LOG scenario 3 (local, 7 kETH) | PENDING | No recorded run of the 116,500 kETH script, locally or on testnets (no e2e artifact, no `lastIncident` in demo state) |
+| 1.R6 | Kelp Replay: scripted forged-message attack that fails | `demo/attack-kelp-replay.ts`, `demo/src/attack.ts`, `demo/e2e.ts` | SIM_LOG scenario 3 (local, 7 kETH); `demo/logs/testnet-run1*.log` | PENDING | Testnet simulation: the Loop Rule BREACH (Δ -116,500 kETH), W3 quarantine and Safe resolution are onchain on all 3 testnets (README "Testnet transactions"), but no `demo e2e --network testnet` has passed: runs 1 and 1b died on RPC 429s, run 1c stopped at the baseline assert because the ledgers were still BROKEN from an earlier attack. A 3-run series was running at audit time (`demo/logs/series.txt`) |
 | 1.R7 | Tagline "Every bridge checks who signed. KIRCHHOFF checks if the money adds up." | `web/components/landing/landing.tsx:83`, `README.md` | n/a | DONE | |
 
 ## 2. Goals, non-goals, success metrics
@@ -65,10 +71,10 @@ Counts are produced from this file by `grep -c` on the status column (see the en
 | ID | Requirement | Code | Test / evidence | Status | Note |
 | --- | --- | --- | --- | --- | --- |
 | 2.G1 | Win the Chainlink track and place main-track Top 5 | `SUBMISSION.md` | n/a | PENDING | Submission not made |
-| 2.G2 | A working CRE workflow is the core of the product | `workflows/` | SIM_LOG 6/6 | DONE | |
+| 2.G2 | A working CRE workflow is the core of the product | `workflows/` | SIM_LOG 7/7 local; staging section | DONE | |
 | 2.G3 | Real CCV policy hook in a CCV Starter Kit cell, with a working fallback | `ccv/`, `judge/`, Fallback B pools | `ccv/STATUS.md`; `KirchhoffTokenPool.t.sol` | FALLBACK | Cell runs with the Judge wired; live attestation blocked (see 9.D2); Fallback B deployed |
-| 2.G4 | Kelp Replay end to end on public testnets, real txs and explorer links | `demo/e2e.ts` | none | PENDING | Testnet ledgers are UNKNOWN and no spec is active; run `demo spec`, `gen-config --target staging`, `seed`, `e2e` 3 times |
-| 2.G5 | UI good enough to screen-record without edits | `web/`, stage mode | `web/e2e/stage.spec.ts` snapshots | PENDING | UI built; recording not made (15.REC) |
+| 2.G4 | Kelp Replay end to end on public testnets, real txs and explorer links | `demo/e2e.ts` | `demo/logs/testnet-run1c.log`, `demo/logs/testnet-reset0.log` | PENDING | kETH spec active on testnet and the first EPOCH written (SIM_LOG staging); no passing testnet e2e yet (1.R6) |
+| 2.G5 | UI good enough to screen-record without edits | `web/`, stage mode | `web/e2e/*` (124 / 124 passed) | PENDING | UI built; recording deferred by product owner (demo video work paused until the owner asks) |
 | 2.P1 | Default economic CCV in the CCV marketplace | n/a | n/a | PENDING | Roadmap (PRD 18) |
 | 2.P2 | Cover tokens on several bridges at once | `engine/src/adapters/event.ts` (generic adapter) | n/a | PENDING | Roadmap: LayerZero, Wormhole, native bridge adapters |
 | 2.P3 | Public conservation status feed consumed by lending protocols | `contracts/src/ConservationFeed.sol` | `ConservationFeed.t.sol` | PENDING | Roadmap: integrations with money markets |
@@ -78,7 +84,7 @@ Counts are produced from this file by `grep -c` on the status column (see the en
 | 2.NG4 | No AI trading, yield or wallet | repo-wide | n/a | DONE | None present |
 | 2.NG5 | No price-based detection in the veto path | `engine/src/types.ts` (no price inputs) | n/a | DONE | |
 | 2.M1 | Forged-credit detection in the same CRE run as the credit event | `workflows/src/w1.ts` `runJunction` | SIM_LOG scenario 3 "BREACH written to 3 chains in the same run ... writes=3" | DONE | Local Anvil; testnet run under 2.G4 |
-| 2.M2 | Loop Rule breach to BROKEN onchain under 60 s after confidence | `workflows/src/w2.ts` | none | PENDING | Pending measurement |
+| 2.M2 | Loop Rule breach to BROKEN onchain under 60 s after confidence | `workflows/src/w2.ts` | SIM_LOG scenario 7 | DONE | Measured in the scenario harness (Anvil, 1 s blocks): BREACH mined 2 / 3 / 4 s after confidence on home / arb / base. Single-node simulation, excludes DON trigger delivery; not measured on public testnets |
 | 2.M3 | 0 false BROKEN over the demo token's full history in backtest | `engine/src/backtest.ts`, `ai/src/backtest.ts` | `engine/test/property.test.ts` (synthetic only) | PENDING | No replay of real kETH history asserted; pending measurement |
 | 2.M4 | Policy hook p99 under 300 ms | `judge/` | `judge/load/RESULTS.md` | PENDING | Met with stub RPCs (p99 6.13 ms); missed on Anvil (485.9 ms); live debit lookups via public RPCs 397-677 ms per message |
 | 2.M5 | 3 testnets, 2 bridges in the demo | `deployments/testnet.json` | TokenAdminRegistry `getPool` returns our pools on all 3 chains; Etherscan verification | DONE | CCIP and WeakBridge |
@@ -94,14 +100,14 @@ Counts are produced from this file by `grep -c` on the status column (see the en
 | 3.P4 | Holder: public status page with one CONSERVED / BROKEN badge | `web/components/status-page/status-page.tsx`, `web/app/t/[token]/badge.svg/route.ts` | `web/e2e/console-errors.spec.ts` on `/t/kETH` (smoke) | DONE | |
 | 3.P5 | CCV operator: Verifier Ops, Helm values, policy hook image | `web/components/ops/verifier-ops.tsx`, `ccv/values/*`, `judge/Dockerfile` | `api/test/lab-ops.test.ts` | DONE | |
 | 3.P6 | AI agent: MCP `kirchhoff.status` and public API | `mcp/src/server.ts` | `mcp/test/mcp.test.ts` | DONE | Tool named `kirchhoff_status` (13.MCP1) |
-| 3.P7 | Judge: Kelp Replay in Mission Control, architecture slide | `web/app/lab`, `docs/ARCHITECTURE.md` | ALs "Kelp Replay runs all 7 steps and Mission Control breaks" | PENDING | Deck slide not built |
+| 3.P7 | Judge: Kelp Replay in Mission Control, architecture slide | `web/app/lab`, `docs/ARCHITECTURE.md`, `media/deck/build.cjs` `slideArchitecture` | ALs "Kelp Replay runs all 7 steps and Mission Control breaks"; `media/deck/KIRCHHOFF.pptx` slide 5 | DONE | |
 | 3.S1 | Issuer describes token, gets an approvable spec with a backtest proving no false alarms on its history | `ai/src/copilot`, `ai/src/backtest.ts`, `web/components/onboard/wizard.tsx` | `ai/test/copilot.int.test.ts`; APIt "backtests a resolved spec against the world's history through the engine" | PENDING | Backtest replays events but evaluates one Loop epoch at head; per-epoch history replay remains |
 | 3.S2 | Every CCIP transfer is signed by KIRCHHOFF only if the money adds up | Judge + Fallback B | `Jt`; `KirchhoffTokenPool.t.sol` | FALLBACK | Enforced at the pool (Fallback B); CCV signature path not onboarded |
 | 3.S3 | When another bridge is exploited, CCIP lanes stop the spread | W1, W3, Fallback B | SIM_LOG scenario 3; `KirchhoffTokenPool.t.sol` `test_revertsWhenLanesFrozenWhileConserved` | DONE | |
 | 3.S4 | Risk steward reads one feed and freezes the asset | `ConservationFeed.sol`, `DemoLendingMarket.sol`, `KirchhoffProtected.sol` | `GuardAndLending.t.sol` `test_lending_borrowRevertsCollateralBroken` | DONE | |
-| 3.S5 | On-call page with exact deficit, offending tx and what is quarantined | `indexer/src/notifier.ts` `incidentText` | `indexer/test/unit.test.ts` "pages once per incident per channel..." | PENDING | Page carries the credit amount, not the deficit; no offending tx hash; containment line is fixed text |
+| 3.S5 | On-call page with exact deficit, offending tx and what is quarantined | `indexer/src/notifier.ts` `incidentText`, `api/src/pager.ts` | `indexer/test/unit.test.ts` "every page carries deficit, offending tx link, containment, Incident Room link and narrative"; APIt "pages once with deficit, offending tx link, containment, Incident Room link and narrative" | DONE | Tested against mocked endpoints; no live page delivered yet (no channel secrets configured) |
 | 3.S6 | Agent queries one MCP tool before moving funds | `mcp/src/server.ts` `kirchhoff_check_transfer` | `mcp.test.ts` "kirchhoff_check_transfer maps snake_case input and tells the agent to stop" | DONE | |
-| 3.N1 | Nice-to-have: replay held messages after recovery with multisig approval | `web/components/incident/side-cards.tsx:210`, `api/src/incident.ts` `heldMessages` | none | PENDING | Button exists and is gated on CONSERVED but has no handler or Safe flow |
+| 3.N1 | Nice-to-have: replay held messages after recovery with multisig approval | `api/src/replay.ts`, `GET /v1/incidents/:id/replay-plan`, `web/components/incident/replay-plan.tsx` | `web/e2e/incident-extras.spec.ts` (`replay-plan`) | PENDING | Read-only replay plan, gated on CONSERVED, tainted senders stay held; no execution and no Safe approval flow (calls are empty by design; the operator runs `ccip-cli manual-exec`) |
 | 3.N2 | Nice-to-have: holder Telegram alert subscription | none | none | PENDING | Not implemented at all; only one operator chat id |
 
 ## 4. Core concepts and glossary
@@ -151,8 +157,8 @@ Counts are produced from this file by `grep -c` on the status column (see the en
 | 5.C5 | Indexer and API: Postgres, viem indexer, Fastify, WebSocket | `indexer/src/indexer.ts`, `api/src/app.ts` | `indexer/test/indexer.int.test.ts`; APIt "WS /v1/stream sends status on connect..." | DONE | |
 | 5.C6 | AI services: Copilot, Narrator, Scout via Claude, tool use, JSON schema | `ai/src/*` | `ai/test/*` (33) | DONE | Claude through OpenRouter by default (Deviation D17) |
 | 5.C7 | MCP server and public API | `mcp/`, `api/src/mcp.ts` | `mcp.test.ts` | DONE | |
-| 5.C8 | Mission Control frontend on Vercel (Next.js 15, Tailwind, shadcn, motion, wagmi) | `web/`, `web/vercel.json` | MCs | PENDING | Built; not deployed to Vercel (no live URL) |
-| 5.C9 | Notifier: Telegram, Slack, PagerDuty | `indexer/src/notifier.ts`, W3 `post()` | `indexer/test/unit.test.ts` | PENDING | No PagerDuty channel; no webhook secrets set, so no page has been delivered |
+| 5.C8 | Mission Control frontend on Vercel (Next.js 15, Tailwind, shadcn, motion, wagmi) | `web/`, `web/vercel.json` | https://kirchhoff-two.vercel.app (HTTP 200, `x-vercel-id: sin1`, checked 2026-10-06); MCs | DONE | API at https://kirchhoff-api.vercel.app (`/healthz` ok, sin1) |
+| 5.C9 | Notifier: Telegram, Slack, PagerDuty | `indexer/src/notifier.ts`, `api/src/pager.ts`, W3 `post()` | `indexer/test/unit.test.ts` "posts to mocked Telegram, Slack and PagerDuty Events v2 endpoints, once per incident per channel" | DONE | PagerDuty Events v2 added (dedup_key = incident id); no live page delivered yet (no channel secrets configured) |
 | 5.A1 | Flow A: user sends 10 kETH Arbitrum to Ethereum through CCIP; pool burns | `demo/seed.ts` | none recorded | PENDING | No recorded testnet CCIP send of kETH |
 | 5.A2 | Each cell's verifier POSTs to its Judge after source finality | upstream verifier, `ccv/values/cell-1.yaml` | `ccv/STATUS.md` ("Policy hook enabled") | FALLBACK | Verifier has never called the Judge: no message names our CCV |
 | 5.A3 | Judge reads status from the ledger through its own RPC | `judge/src/evaluate.ts` `destinationView`, `sourceView` | `Jt` PASS and FAIL paths | DONE | |
@@ -164,9 +170,9 @@ Counts are produced from this file by `grep -c` on the status column (see the en
 | 5.B2 | W1 log trigger on `Released`, searches remotes for `Burned`, none | `w1.ts` `findDebit` | SIM_LOG scenario 3 | DONE | |
 | 5.B3 | W1 writes BROKEN with evidence hash to all 3 ledgers in the same run | `w1.ts` `writeToLedgers` | SIM_LOG scenario 3 "writes=3" | DONE | |
 | 5.B4 | W3 quarantine: lanes freeze, attacker tainted, feed BROKEN or worse | `w3.ts`, `QuarantineController` | SIM_LOG scenario 3 "every ledger QUARANTINED" | DONE | |
-| 5.B5 | Attacker's CCIP move to Base refused (Judge FAIL TOKEN_BROKEN, never executes) | Fallback B pools; `JC` | `KirchhoffTokenPool.t.sol` `test_revertsWhenBroken_everyEntryPoint`; `Jt` "TOKEN_BROKEN on the source chain" | FALLBACK | Enforced by Fallback B. The demo calls the pool's `kirchhoffCheck` (eth_call); a real `ccipSend` through the router is still to do (see Pending work) |
+| 5.B5 | Attacker's CCIP move to Base refused (Judge FAIL TOKEN_BROKEN, never executes) | Fallback B pools; `JC` | `KirchhoffTokenPool.t.sol` `test_revertsWhenBroken_everyEntryPoint`; `Jt` "TOKEN_BROKEN on the source chain" | FALLBACK | Enforced by Fallback B. `demo/src/attack.ts` now sends a real `Router.ccipSend` on testnet and asserts the revert (KirchhoffGuard first, then the pool with lanes frozen); no recorded testnet run of that step yet |
 | 5.B6 | Guard blocks tainted transfer on home; lending market freezes borrowing | `KirchhoffGuard.sol`, `DemoLendingMarket.sol` | `GuardAndLending.t.sol` `test_guard_blocksTaintedSender`, `test_lending_borrowRevertsCollateralBroken` | DONE | |
-| 5.B7 | W2 next epoch confirms Δ = -116,500 kETH | `demo/src/attack.ts` `deficitEpoch`, `w2.ts` | SIM_LOG scenario 5 (LOOP_DEFICIT for a direct mint) | PENDING | Post-forgery LOOP_DEFICIT epoch not shown in a run; e2e checks reason 6 but not the Δ value |
+| 5.B7 | W2 next epoch confirms Δ = -116,500 kETH | `demo/e2e.ts` (asserts Δ exactly -116,500 kETH), `demo/src/attack.ts` `deficitEpoch`, `w2.ts` | `demo/logs/testnet-run1c.log` "epoch 1791245933 status=3 reason=6 delta=-116500000000000000000000 writes=3"; SIM_LOG scenario 5 | DONE | Testnet simulation: W2 wrote BREACH `LOOP_DEFICIT` with Δ = -116,500 kETH to all 3 testnet ledgers |
 | 5.TB1 | Chain data: DON consensus; each Judge uses independent RPCs | `judge/src/config.ts` `rpcFor` (refuses identical URLs) | `judge/test/config.test.ts` "needs two distinct providers per spec chain" | DONE | |
 | 5.TB2 | CRE DON honest majority; KIRCHHOFF additive | design | n/a | DONE | |
 | 5.TB3 | 3 of 4 cells honest in production | `ccv/values/cell-1..4.yaml` | n/a | CUT | Cut list item 5 (4-cell committee); 1 cell, committee shown in the architecture |
@@ -211,9 +217,9 @@ Counts are produced from this file by `grep -c` on the status column (see the en
 | 6.LC1 | Draft: issuer YAML or Copilot draft | `ai/src/copilot`, `web/components/onboard` | `copilot.int.test.ts` | DONE | |
 | 6.LC2 | Validate: schema plus semantic checks incl. bytecode on chain | `engine/src/spec/validate.ts` | `spec.test.ts` "reports every semantic error", "runs the injected bytecode check on every real address" | DONE | |
 | 6.LC3 | Backtest full history; any BROKEN blocks activation | `engine/src/backtest.ts`, `ai/src/backtest.ts`, `wizard.tsx` | `backtest.test.ts` | PENDING | One synthetic Loop epoch at head; the block is a UI gate only |
-| 6.LC4 | Propose the spec hash in `KirchhoffRegistry` by issuer multisig | `KirchhoffRegistry.proposeSpec` (`onlyIssuer`), `demo/spec-activate.ts` | `KirchhoffRegistry.t.sol` `test_propose_onlyIssuerAndValidated` | DONE | Not yet executed on testnet (see Pending work) |
+| 6.LC4 | Propose the spec hash in `KirchhoffRegistry` by issuer multisig | `KirchhoffRegistry.proposeSpec` (`onlyIssuer`), `demo/spec-activate.ts` | `KirchhoffRegistry.t.sol` `test_propose_onlyIssuerAndValidated`; SIM_LOG staging (activated in Sepolia tx `0x43b895d4...0b87`) | DONE | Executed on testnet through the issuer Safe |
 | 6.LC5 | Timelock 48 h production, 10 min testnet, visible in UI | `KirchhoffRegistry.sol`, `web/components/onboard/step-timelock.tsx` | `test_proposeActivate_timelock`; onchain `timelockSeconds() = 600` | DONE | |
-| 6.LC6 | Activate emits `SpecActivated`; W4 picks it up and workflows load the new config | `activateSpec`, W4 trigger 0 | `KirchhoffRegistry.t.sol` | PENDING | W4 is triggered but does not reload a spec; configs are compiled at deploy time; trigger never simulated |
+| 6.LC6 | Activate emits `SpecActivated`; W4 picks it up and workflows load the new config | `activateSpec`, W4 trigger 0, `workflows/src/w4.ts` `runTopology` | `KirchhoffRegistry.t.sol`; `workflows.test.ts` "reloads the active spec: a registry hash different from the running spec is SPEC_MISMATCH, an equal one is clean"; SIM_LOG "W4 on the real SpecActivated log" (`findings=0`) | DONE | Deviation D23: W4 reads `activeSpecHash` on every run and raises DRIFT `SPEC_MISMATCH` when it differs from the compiled spec; the new config is regenerated with `gen-config` |
 
 ## 7. Smart contracts
 
@@ -266,7 +272,7 @@ Counts are produced from this file by `grep -c` on the status column (see the en
 | 8.W2.1 | Pinned block per chain at confidence | `w2.ts` `runLoop` | SIM_LOG "pinned home= arb= base=" | DONE | |
 | 8.W2.2 | One Multicall3 `callContract` per chain at the pin | `runLoop` | SIM_LOG `W2 reads used 12/15` | DONE | |
 | 8.W2.3 | In-flight via `filterLogs` matched by id | `runLoop` + `matchAll` | SIM_LOG scenario 2 | DONE | |
-| 8.W2.4 | Optional PoR feed read for backed tokens | `config.ts` field only | none | PENDING | Not implemented (kETH has no PoR feed) |
+| 8.W2.4 | Optional PoR feed read for backed tokens | `workflows/src/w2.ts` (PoR `latestRoundData` inside the pinned Multicall3) | `workflows.test.ts` "reads latestRoundData at the pinned home block...", "breaks with RESERVE_SHORTFALL when claims exceed the reserve", "fails closed on a negative reserve answer and on a burn-and-mint token with no feed" | DONE | kETH has no PoR feed, so its runs skip the read (12 reads) |
 | 8.W2.5 | `engine.loop` | `runLoop` | scenarios 5, 6 | DONE | |
 | 8.W2.6 | EPOCH or BREACH to every chain with `blocksHash` | `planEpoch`, `epochBody` | SIM_LOG `writes=3` | DONE | |
 | 8.W2.D | Determinism from consensus header reads | `runLoop` | SIM_LOG | DONE | |
@@ -276,12 +282,12 @@ Counts are produced from this file by `grep -c` on the status column (see the en
 | 8.W3.3 | One notification per channel, idempotency key = incident id | `w3-responder/main.ts` `post`, `buildNotifications` | "decodes BreachRecorded and builds pages keyed by incident id..." | DONE | No webhook secrets configured, so runs log "notified 0" |
 | 8.W3.S | Secrets from CRE secrets | `workflows/secrets.yaml`, `runtime.getSecret` | n/a | DONE | |
 | 8.W4.T | Triggers `SpecActivated` plus cron 10 min | `w4-topology/main.ts` | `workflows.test.ts` | DONE | Plus `RoleGranted` triggers |
-| 8.W4.1 | Reload active specs | none | none | PENDING | W4 uses the spec compiled into its config |
-| 8.W4.2 | Scan for new minters, pools or peers | `w4.ts` `grantedMinters` | "scans RoleGranted windows..."; SIM_LOG scenario 5 | PENDING | Minter grants on remotes only; pool and peer-set scans remain |
-| 8.W4.3 | Unlisted minter: DRIFT `SPEC_MISMATCH` and notify the issuer | `runTopology` | SIM_LOG scenario 5 "PASS W4 flags the unlisted minter" | PENDING | DRIFT raised; no issuer notification |
+| 8.W4.1 | Reload active specs | `workflows/src/w4.ts` `readState` (`activeSpecHash`) | `workflows.test.ts` "reloads the active spec..."; SIM_LOG staging W4 runs | DONE | See Deviation D23 |
+| 8.W4.2 | Scan for new minters, pools or peers | `workflows/src/w4.ts` `grantedMinters`, `checkPools` | `workflows.test.ts` "checks the CCIP pool and its peers from current state; all consistent is clean at 14 reads", "flags a registry pool that is not a spec minter, a rogue peer pool and a peer chain outside the spec"; SIM_LOG staging W4 (14/15 reads) | DONE | Pools via TokenAdminRegistry `getPool`, peers via `getRemotePools` |
+| 8.W4.3 | Unlisted minter: DRIFT `SPEC_MISMATCH` and notify the issuer | `runTopology`, `workflows/w4-topology/main.ts` `page` | `workflows.test.ts` "raises EPOCH DRIFT SPEC_MISMATCH for a minter outside the spec, with a page keyed by the drift"; SIM_LOG scenario 5 | DONE | Issuer paged through the CRE HTTP capability, idempotency key = drift key; no live delivery yet (no secrets) |
 | 8.RL | Repository layout incl. `config.staging.json` and `config.production.json` per workflow | `workflows/w*-*/` | `ls` | FALLBACK | No production config: there is no production deploy (deploy access not enabled) |
-| 8.C1a | `cre workflow simulate` against local chains | `workflows/project.yaml` `local` | SIM_LOG 6/6 | DONE | |
-| 8.C1b | `cre workflow simulate --target staging` against public testnets | `project.yaml` `staging`, generated `config.staging.json` | SIM_LOG staging section (pre-deployment, failed closed) | PENDING | Re-run after the testnet spec is active; record in SIM_LOG |
+| 8.C1a | `cre workflow simulate` against local chains | `workflows/project.yaml` `local` | SIM_LOG 7/7 | DONE | |
+| 8.C1b | `cre workflow simulate --target staging` against public testnets | `project.yaml` `staging`, generated `config.staging.json` | SIM_LOG "Staging (public testnets), 2026-10-06": W2 cron `--broadcast` EPOCH on 3 testnets; W4 cron and SpecActivated `findings=0` | DONE | W1 and W3 staging runs belong to the testnet e2e (1.R6) |
 | 8.C2 | `cre workflow deploy` once access is confirmed | n/a | `cre whoami` | FALLBACK | Deploy access not enabled; PRD sanctions simulation |
 | 8.CF | Config generated from the spec by `engine/compile.ts`, never hand edited | `engine/src/compile.ts`, `gen-config.ts`, `demo/src/cre.ts` | `workflows/test/core.test.ts` "generated configs parse with the workflow schemas..." | DONE | |
 
@@ -357,14 +363,14 @@ Counts are produced from this file by `grep -c` on the status column (see the en
 | 11.SC.T6 | `validate_spec` | `tools.ts` | `copilot.int.test.ts` agent loop | DONE | |
 | 11.SC.T7 | `backtest_spec` | `tools.ts`, `ai/src/backtest.ts` | APIt "backtests a resolved spec..." | DONE | |
 | 11.SC.F1 | Validation runs automatically after the draft | `copilot/agent.ts` | `copilot.int.test.ts` | DONE | |
-| 11.SC.F2 | Backtest runs automatically | `wizard.tsx` | none | PENDING | Runs on the Approve click, not automatically |
+| 11.SC.F2 | Backtest runs automatically | `wizard.tsx` (backtest effect once every line has evidence), `step-backtest.tsx` `AutoBacktestSummary` | `web/e2e/onboard.spec.ts` (`auto-backtest`) | DONE | |
 | 11.SC.F3 | Provenance chip on every line and a plain-English why per minter | `spec-review.tsx` | `copilot.int.test.ts` | DONE | |
 | 11.SC.F4 | Approval opens a Safe transaction proposing the spec hash | `step-propose.tsx` | none | DONE | Opens the Safe Transaction Builder with a copyable hash; calldata is not prefilled |
 | 11.N1 | Narrator input: deterministic evidence bundle | `api/src/incident.ts` | `narrator.test.ts` | DONE | |
 | 11.N2 | 120-word summary, timeline, blast radius per chain, next steps from a fixed playbook | `narrator.ts` schema and `PLAYBOOK` | "drops sentences citing unknown evidence and rejects off-playbook steps" | DONE | Word limit is a prompt hint; blast radius is deterministic |
 | 11.N3 | Every sentence cites evidence; label "AI summary. Verify against evidence." | `narrator.ts` `NARRATIVE_LABEL` | `ai/eval/RESULTS.md` section 3 (100%) | DONE | |
-| 11.N4 | Narrative posted to Slack and Telegram with the incident link | `indexer/src/notifier.ts` | `indexer/test/unit.test.ts` | PENDING | Pages carry fixed text plus the link, not the narrative |
-| 11.TS | Topology Scout crawls for forgotten supply paths and files proposals in Onboarding | `ai/src/scout.ts` | `scout.test.ts` | PENDING | Same-name / same-symbol search only; not wired to any route, schedule or the Onboarding screen |
+| 11.N4 | Narrative posted to Slack and Telegram with the incident link | `indexer/src/notifier.ts`, `api/src/pager.ts` | `indexer/test/unit.test.ts` "every page carries deficit, offending tx link, containment, Incident Room link and narrative"; APIt "pages once with deficit..." | DONE | No live delivery yet (no channel secrets configured) |
+| 11.TS | Topology Scout crawls for forgotten supply paths and files proposals in Onboarding | `ai/src/scout.ts`, `POST /v1/specs/scout`, `GET /v1/specs/proposals`, `web/components/onboard/step-scout.tsx` | `scout.test.ts`; APIt "POST /v1/specs/scout files a same-symbol deployment the spec does not list; GET /v1/specs/proposals lists it"; `web/e2e/onboard.spec.ts` (`scout-panel`) | DONE | Searches Blockscout for same-name and same-symbol deployments the spec does not list; proposals are drafts |
 | 11.AK | Ask KIRCHHOFF over the read model with read-only SQL, citing rows | `ai/src/ask.ts`, `indexer/migrations/002_ask_readonly.sql`, `api/src/ai.ts`, `web/components/ask/ask-palette.tsx` | `ask.test.ts` "returns forbidden SQL to the model as an error and never runs it" | DONE | |
 | 11.MCP | Agent access through MCP | `mcp/` | `mcp.test.ts` | DONE | |
 | 11.EV1 | Copilot provenance coverage 100% on the demo token | `ai/eval/run.ts` | RESULTS.md section 1: 15 / 15 lines, 100.0% | DONE | |
@@ -419,8 +425,8 @@ Counts are produced from this file by `grep -c` on the status column (see the en
 | 12.ST3 | Stale: dim to 60%, banner text | `StaleBanner`, `.is-stale` | MCs "stale state dims panels and names the stale policy" | DONE | |
 | 12.ST4 | RPC or API error: inline banner naming the chain | `StateBanners` | MCs "RPC error names the failing chain and the rest stays live" | DONE | |
 | 12.ST5 | Breach: red frame, toast, Incident Room link, optional sound off by default | `breach-effects.tsx` | MCs breach test; `breach-toast.spec.ts` | DONE | |
-| 12.A1 | WCAG 2.2 AA contrast in both themes | `globals.css` | none | PENDING | Not verified by any automated contrast or axe check |
-| 12.A2 | Full keyboard navigation, visible focus rings | `globals.css` `:focus-visible` | none | PENDING | Focus rings exist; keyboard flow not verified |
+| 12.A1 | WCAG 2.2 AA contrast in both themes | `globals.css` | `web/e2e/a11y.spec.ts` (axe, WCAG 2.2 AA, 11 routes in both themes) | DONE | |
+| 12.A2 | Full keyboard navigation, visible focus rings | `globals.css` `:focus-visible` | `web/e2e/keyboard.spec.ts` (6 tests) | DONE | |
 | 12.A3 | Verdict Stream polite live region; breach assertive | `verdict-stream.tsx`, `BreachToast` | none | DONE | |
 | 12.A4 | Every chart has a data table toggle | `delta-history.tsx`, `verifier-ops.tsx` | MCs "Δ history has a data table toggle" | DONE | |
 | 12.SM | Stage mode `?stage=1`: 1920x1080, type 120%, big cursor, no dev controls, motion 1.3x | `prefs.tsx`, `globals.css`, `stage-frame.tsx` | `stage.spec.ts` (4 snapshots) | DONE | |
@@ -464,7 +470,7 @@ Counts are produced from this file by `grep -c` on the status column (see the en
 | 14.T4 | Replay or double credit: consumed set, `DOUBLE_CREDIT` | `junction.ts`, `CL.isConsumed` | SIM_LOG scenario 4 | DONE | |
 | 14.T5 | Lying or eclipsed RPC: two providers per Judge | `rpc.ts`, `config.ts` | `Jt` PENDING paths; `judge/CHAOS.md` | DONE | |
 | 14.T6 | Reorg: finalized confidence by default | `engine/specs/kETH.yaml` `confidence.default: finalized` | `junction.test.ts` "condition 4: confidence" | DONE | |
-| 14.T7 | Spec poisoning: Safe plus timelock; UI diff alert on every proposal | `KirchhoffRegistry.sol` | `KirchhoffRegistry.t.sol` | PENDING | Safe and timelock done; no UI diff alert for pending proposals |
+| 14.T7 | Spec poisoning: Safe plus timelock; UI diff alert on every proposal | `KirchhoffRegistry.sol`, `api/src/specs.ts`, `web/components/kh/spec-proposal-alert.tsx` | `KirchhoffRegistry.t.sol`; APIt "diffs a pending registry proposal against the active spec field by field, flagging loosened rules"; MCs (`spec-diff`) | DONE | |
 | 14.T8 | Report replay across chains or ledgers | `CL._processReport` | CLt `test_replay_*` | DONE | |
 | 14.T9 | Operator compromise cannot sign alone | issuer-only release paths | `test_resolve_onlyIssuer`, `test_creReportAloneCanNeverClearBroken` | DONE | 3-of-4 cells cut (9.H2); ledger owner should hand off to the Safe (`HANDOFF_TO_SAFE`) |
 | 14.T10 | Malicious AI suggestion: provenance, no write tools | `ai/src/copilot` | `copilot.int.test.ts` | DONE | |
@@ -482,31 +488,31 @@ Counts are produced from this file by `grep -c` on the status column (see the en
 | ID | Requirement | Code | Test / evidence | Status | Note |
 | --- | --- | --- | --- | --- | --- |
 | 15.W | Design against judging weights | `SUBMISSION.md` mapping | n/a | DONE | |
-| 15.DS1 | 0:00 headline numbers | deck | none | PENDING | Video not recorded |
-| 15.DS2 | 0:15 Mission Control idle, normal CCIP transfer PASS | `mission-control.tsx` | MCs | PENDING | Needs live testnet data (2.G4) and recording |
-| 15.DS3 | 0:35 Attack Lab, 116,500 kETH released, explorer tx | `attack-lab.tsx` | ALs | PENDING | Recording |
-| 15.DS4 | 1:05 red wire, Δ to -116,500, BREACH txs on 3 chains | `breach-effects.tsx` | MCs breach test | PENDING | Recording |
-| 15.DS5 | 1:25 attacker CCIP send refused (Judge FAIL TOKEN_BROKEN), CCIP explorer | Fallback B | none | PENDING | Needs a real `ccipSend` refusal; CCIP explorer link is a placeholder in `attack.ts` |
-| 15.DS6 | 1:50 Guard revert and `borrow()` revert | `attack.ts` `attemptRefusals` | none | PENDING | Recording |
-| 15.DS7 | 2:05 Incident Room narrative and checklist | `incident-room.tsx` | IRs | PENDING | Recording |
-| 15.DS8 | 2:20 title slide tagline | deck | none | PENDING | |
-| 15.DK1 | Slide 1 title | none | none | PENDING | No deck file in the repo |
-| 15.DK2 | Slide 2 problem | none | none | PENDING | |
-| 15.DK3 | Slide 3 two rules | `README.md` math | none | PENDING | |
-| 15.DK4 | Slide 4 embedded video | none | none | PENDING | |
-| 15.DK5 | Slide 5 architecture | `docs/ARCHITECTURE.md` diagram | none | PENDING | |
-| 15.DK6 | Slide 6 why Chainlink | `SUBMISSION.md` paragraph | none | PENDING | |
-| 15.DK7 | Slide 7 business | PRD 18 | none | PENDING | |
-| 15.DK8 | Slide 8 limits and roadmap | `README.md` limits | none | PENDING | |
-| 15.SUB1 | Public repo with README, diagram, addresses, workflow ids, Kelp Replay how-to | `README.md` | n/a | PENDING | README written; repo has no git remote yet; workflow ids are simulation ids |
-| 15.SUB2 | Live URL: read-only Mission Control with "Replay last incident" | `web/components/mission/incident-replay.tsx`, `web/vercel.json` | none | PENDING | Not deployed |
-| 15.SUB3 | Deck .pptx with the video on Google Drive | none | none | PENDING | |
+| 15.DS1 | 0:00 headline numbers | deck | none | PENDING | Deferred by product owner (demo video work paused until the owner asks) |
+| 15.DS2 | 0:15 Mission Control idle, normal CCIP transfer PASS | `mission-control.tsx` | MCs | PENDING | Deferred by product owner (demo video work paused until the owner asks); live testnet data exists (5.C8) |
+| 15.DS3 | 0:35 Attack Lab, 116,500 kETH released, explorer tx | `attack-lab.tsx` | ALs | PENDING | Deferred by product owner (demo video work paused until the owner asks) |
+| 15.DS4 | 1:05 red wire, Δ to -116,500, BREACH txs on 3 chains | `breach-effects.tsx` | MCs breach test | PENDING | Deferred by product owner (demo video work paused until the owner asks); the BREACH txs on 3 chains exist (README "Testnet transactions") |
+| 15.DS5 | 1:25 attacker CCIP send refused (Judge FAIL TOKEN_BROKEN), CCIP explorer | Fallback B | none | PENDING | Deferred by product owner (demo video work paused until the owner asks); also needs a recorded testnet `ccipSend` refusal (5.B5) |
+| 15.DS6 | 1:50 Guard revert and `borrow()` revert | `attack.ts` `attemptRefusals` | none | PENDING | Deferred by product owner (demo video work paused until the owner asks) |
+| 15.DS7 | 2:05 Incident Room narrative and checklist | `incident-room.tsx` | IRs | PENDING | Deferred by product owner (demo video work paused until the owner asks) |
+| 15.DS8 | 2:20 title slide tagline | deck | none | PENDING | Deferred by product owner (demo video work paused until the owner asks) |
+| 15.DK1 | Slide 1 title | `media/deck/build.cjs` `slideTitle` | `media/deck/KIRCHHOFF.pptx` | DONE | |
+| 15.DK2 | Slide 2 problem | `media/deck/build.cjs` `slideProblem` | `media/deck/KIRCHHOFF.pptx` | DONE | |
+| 15.DK3 | Slide 3 two rules | `media/deck/build.cjs` `slideInsight` | `media/deck/KIRCHHOFF.pptx` | DONE | |
+| 15.DK4 | Slide 4 embedded video | `media/deck/build.cjs` `slideDemo` | `media/deck/KIRCHHOFF.pptx` | PENDING | Deferred by product owner (demo video work paused until the owner asks); the slide shows a placeholder frame until `media/video/kirchhoff-demo.mp4` exists |
+| 15.DK5 | Slide 5 architecture | `media/deck/build.cjs` `slideArchitecture` | `media/deck/KIRCHHOFF.pptx` | DONE | |
+| 15.DK6 | Slide 6 why Chainlink | `media/deck/build.cjs` `slideWhyChainlink` | `media/deck/KIRCHHOFF.pptx` | DONE | |
+| 15.DK7 | Slide 7 business | `media/deck/build.cjs` `slideBusiness` | `media/deck/KIRCHHOFF.pptx` | DONE | |
+| 15.DK8 | Slide 8 limits and roadmap | `media/deck/build.cjs` `slideRoadmap` | `media/deck/KIRCHHOFF.pptx` | DONE | |
+| 15.SUB1 | Public repo with README, diagram, addresses, workflow ids, Kelp Replay how-to | `README.md` | https://github.com/Adwaitbytes/kirchhoff (public, `main` in sync with origin) | DONE | Workflow ids are the CRE simulation ids; DON ids need deploy access (8.C2) |
+| 15.SUB2 | Live URL: read-only Mission Control with "Replay last incident" | `web/components/mission/incident-replay.tsx`, `web/vercel.json`, `api/vercel.json` | https://kirchhoff-two.vercel.app (live, sin1) | PENDING | Deployed read-only. The live read model was last indexed at Sepolia block 11850609, before the testnet incidents, so "Replay last incident" has no testnet incident yet |
+| 15.SUB3 | Deck .pptx with the video on Google Drive | `media/deck/KIRCHHOFF.pptx` | none | PENDING | Deferred by product owner (demo video work paused until the owner asks); deck exists without the video and is not uploaded |
 | 15.SUB4 | Main and Chainlink track submissions with the CRE and CCIP paragraph | `SUBMISSION.md` | n/a | PENDING | Paragraphs drafted |
 | 15.SUB5 | Submitted before 11:59 pm, October 7 | n/a | n/a | PENDING | |
-| 15.REC1 | `demo/reset.ts` restores 3 chains in under 3 minutes | `demo/src/reset.ts` (`elapsedMs`, `underThreeMinutes`) | `e2e.ts` asserts < 180 s on local only | PENDING | No recorded reset timing; testnet not asserted |
-| 15.REC2 | Three full takes, best kept unedited | n/a | n/a | PENDING | |
-| 15.REC3 | Explorer tabs pre-opened, clock visible | n/a | n/a | PENDING | |
-| 15.REC4 | Second machine records a backup take | n/a | n/a | PENDING | Human task |
+| 15.REC1 | `demo/reset.ts` restores 3 chains in under 3 minutes | `demo/src/reset.ts` (`elapsedMs`, `underThreeMinutes`) | `demo/logs/testnet-reset0.log` | PENDING | Measured on testnets: 1426.5 s (`underThreeMinutes: false`), mostly waiting for Sepolia, Arbitrum and Base finality before RECOVERY_CHECK; under 180 s asserted on local only |
+| 15.REC2 | Three full takes, best kept unedited | n/a | n/a | PENDING | Deferred by product owner (demo video work paused until the owner asks) |
+| 15.REC3 | Explorer tabs pre-opened, clock visible | n/a | n/a | PENDING | Deferred by product owner (demo video work paused until the owner asks) |
+| 15.REC4 | Second machine records a backup take | n/a | n/a | PENDING | Deferred by product owner (demo video work paused until the owner asks); human task |
 
 ## 16. 36-hour build plan
 
@@ -518,13 +524,13 @@ Counts are produced from this file by `grep -c` on the status column (see the en
 | 16.PR4 | Cloud VM for k3s, Vercel project, Postgres | `ccv/`, Neon Postgres | `CREDENTIALS_NEEDED.md` | FALLBACK | Local k3d instead of a cloud VM |
 | 16.PR5 | Anthropic API key, explorer API keys | `.env` | `ai/eval/RESULTS.md` (OpenRouter); Etherscan V2 verification | FALLBACK | Claude through OpenRouter instead of a direct Anthropic key (Deviation D17) |
 | 16.PR6 | Team reads PRD 4-9 and Starter Kit docs | `docs/research/*` | n/a | DONE | |
-| 16.TM1 | Lead: mentor answers, cut decisions, video, deck | `HUMAN_TASKS.md` | n/a | PENDING | Video and deck |
+| 16.TM1 | Lead: mentor answers, cut decisions, video, deck | `HUMAN_TASKS.md` | n/a | PENDING | Deferred by product owner (demo video work paused until the owner asks); deck generator at `media/deck` |
 | 16.TM2 | Contracts lead: deployed and verified on 3 testnets | `deployments/testnet*.json` | Etherscan V2 | DONE | |
 | 16.TM3 | Contracts 2: demo contracts, Guard, TokenPool, deploy and reset scripts | `contracts/src/demo`, `demo/` | `forge test`, `demo` tests | DONE | |
-| 16.TM4 | CRE lead: W1 and W2 simulating green against testnets | `workflows/` | SIM_LOG (local green; staging pre-deploy) | PENDING | 8.C1b |
+| 16.TM4 | CRE lead: W1 and W2 simulating green against testnets | `workflows/` | SIM_LOG staging section (W2 `--broadcast`, W4); `workflows/runner.log.jsonl` | PENDING | W2 green on all 3 testnets (first EPOCH, Loop BREACH, RECOVERY_CHECK); W1 has no recorded green staging run yet (the runner hit RPC 429s) |
 | 16.TM5 | Engine at 100% branch coverage | `engine/` | coverage run | DONE | |
 | 16.TM6 | CCV/infra: Judge live in a cell, or Fallback B | `ccv/`, `judge/` | STATUS.md | FALLBACK | Fallback B primary |
-| 16.TM7 | Frontend lead: hero screen on live data | `web/` | Playwright on fixtures | PENDING | Testnet ledgers have no epochs yet |
+| 16.TM7 | Frontend lead: hero screen on live data | `web/` | https://kirchhoff-two.vercel.app; Playwright on fixtures | PENDING | Live on the testnet read model, but the indexer is not running continuously (last indexed Sepolia block 11850609) |
 | 16.TM8 | Frontend 2: all screens with real states | `web/` | MCs, IRs | DONE | |
 | 16.TM9 | AI + API: indexer, Copilot, Narrator | `indexer/`, `ai/`, `api/` | package tests | DONE | |
 | 16.HG1 | Hour 4: ABI freeze | `docs/INTERFACES.md`, `contracts/src/interfaces/` | commit `d8aebf6` | DONE | |
@@ -532,7 +538,7 @@ Counts are produced from this file by `grep -c` on the status column (see the en
 | 16.HG3 | Hour 22: first full Kelp Replay on testnets | `demo/e2e.ts` | none | PENDING | 2.G4 |
 | 16.HG4 | Hour 28: code freeze | n/a | n/a | PENDING | |
 | 16.HG5 | Hour 35: submitted | n/a | n/a | PENDING | |
-| 16.CL1 | Cut list 1: Topology Scout | `ai/src/scout.ts` | `scout.test.ts` | PENDING | Not cut: built, not wired (11.TS) |
+| 16.CL1 | Cut list 1: Topology Scout | `ai/src/scout.ts` | `scout.test.ts`; APIt scout tests; `onboard.spec.ts` | DONE | Not cut: built and wired (11.TS) |
 | 16.CL2 | Cut list 2: Ask KIRCHHOFF | `ai/src/ask.ts` | `ask.test.ts` | DONE | Not cut |
 | 16.CL3 | Cut list 3: MCP server | `mcp/` | `mcp.test.ts` | DONE | Not cut |
 | 16.CL4 | Cut list 4: LayerZero adapter | none | n/a | CUT | Fallback: roadmap slide |
@@ -551,15 +557,15 @@ Counts are produced from this file by `grep -c` on the status column (see the en
 
 | ID | Requirement | Code | Test / evidence | Status | Note |
 | --- | --- | --- | --- | --- | --- |
-| 17.TL1 | Engine unit: every reason code and branch, 100% branches | `engine/test/*` | 249 passed, 586/586 branches | DONE | |
+| 17.TL1 | Engine unit: every reason code and branch, 100% branches | `engine/test/*` | 251 passed (CI run 37393797827), 100% branches | DONE | |
 | 17.TL2 | Engine property: 10,000 random sequences, every forgery flagged, zero false flags | `engine/test/property.test.ts` | "holds over 10,000 random histories" (`numRuns: 10_000`, seed 20261006) | DONE | |
 | 17.TL3 | Contracts unit: every report type, illegal transition, replay rejection | `contracts/test/*` | 150 passed | DONE | |
 | 17.TL4 | Contracts invariant: BROKEN never to CONSERVED without RECOVERING; epochId increases | `test/invariant/LedgerInvariants.t.sol` | 3 invariants pass | DONE | |
-| 17.TL5 | Workflows: `cre workflow simulate` on 3 Anvil chains with a mock forwarder, 6 scenarios | `workflows/scripts/scenarios.ts` | SIM_LOG 6/6 PASS (2026-10-03) | DONE | |
+| 17.TL5 | Workflows: `cre workflow simulate` on 3 Anvil chains with a mock forwarder, 6 scenarios | `workflows/scripts/scenarios.ts` | SIM_LOG 7/7 PASS (run 2026-10-05; scenario 7 is the 2.M2 latency run) | DONE | |
 | 17.TL6 | Judge: HMAC rejection, every FAIL path, 2 s budget, RPC disagreement, recorded payloads | `judge/test/*` | 96 passed | DONE | |
 | 17.TL7 | End to end `demo/e2e.ts` on public testnets, run 3 times | `demo/e2e.ts` | none | PENDING | Never run on testnets; no local run artifact either |
 | 17.TL8 | Chaos: kill one RPC, kill the Judge, pause W2 | `judge/scripts/chaos.sh` | `judge/CHAOS.md` | DONE | Light, as scoped; stub chains |
-| 17.TL9 | Playwright: Mission Control, Incident Room, Attack Lab, stage snapshot | `web/e2e/*` | specs exist; last recorded report holds the console suite only (13 / 13) | PENDING | Re-run all suites and keep the report |
+| 17.TL9 | Playwright: Mission Control, Incident Room, Attack Lab, stage snapshot | `web/e2e/*` | 124 / 124 passed (`web/playwright-report`, local run 2026-10-06 after commit `230054a`; commit message) | DONE | Not in CI (CI runs the TypeScript and contracts jobs) |
 | 17.TL10 | AI eval scripts per section 11 | `ai/eval/run.ts` | RESULTS.md | DONE | |
 | 17.TL11 | Load: k6 100 rps, p99 under 300 ms | `judge/load/k6.js` | RESULTS.md run A: p99 6.13 ms, 0 / 6001 failed | DONE | Run B on Anvil misses (485.9 ms); see 2.M4 |
 | 17.SC1 | Normal round trip: CONSERVED throughout | `scenarios.ts`; `engine/test/scenarios.test.ts` | SIM_LOG scenario 1 PASS | DONE | |
@@ -569,8 +575,8 @@ Counts are produced from this file by `grep -c` on the status column (see the en
 | 17.SC5 | Direct mint: BROKEN `LOOP_DEFICIT` | same | scenario 5 PASS | DONE | |
 | 17.SC6 | Donation: Δ rises, CONSERVED, UI shows surplus | same; `conservation-meter.tsx` | scenario 6 PASS | DONE | |
 | 17.DOD1 | Tests written and green | all packages | baseline table above | DONE | |
-| 17.DOD2 | Works on the 3 public testnets, not just Anvil | `deployments/testnet.json` | ledgers UNKNOWN | PENDING | 2.G4 |
-| 17.DOD3 | Every number links to an explorer tx or onchain read | `links.tsx`, `explorer.ts` | MCs checks Δ and status pill only | PENDING | Verifier Ops stats (p50/p99, counts) have no link; no test sweeps every number |
+| 17.DOD2 | Works on the 3 public testnets, not just Anvil | `deployments/testnet.json` | Ledgers written by CRE simulation on all 3 testnets (README "Testnet transactions") | PENDING | EPOCH, Loop BREACH, W3 quarantine, Safe resolution and RECOVERY_CHECK ran on testnets; a passing full e2e is pending (1.R6) |
+| 17.DOD3 | Every number links to an explorer tx or onchain read | `links.tsx`, `explorer.ts` | `web/e2e/ops-links.spec.ts` sweeps every Verifier Ops figure; MCs checks Δ and status pill | PENDING | Ops figures link to their source or are marked not public; no sweep yet over every Mission Control and Incident Room number |
 | 17.DOD4 | Loading, empty, stale, error, breach states | 12.ST1-5 | MCs | DONE | |
 | 17.DOD5 | No em dashes in user-facing copy | `web/` | `grep -rn` for U+2014 in `web/app web/components web/lib`: 0 | DONE | |
 
@@ -596,8 +602,8 @@ Counts are produced from this file by `grep -c` on the status column (see the en
 | 19.RK1 | CCV registration not ready: Fallback B from hour 4 | pools | `KirchhoffTokenPool.t.sol`; deployed | DONE | |
 | 19.RK2 | CRE live deploy not granted: simulate, labeled honestly | README, SIM_LOG | n/a | DONE | |
 | 19.RK3 | False DRIFT or BROKEN from in-flight: matching, scenario 2 | `matchAll` | scenario 2 PASS | DONE | |
-| 19.RK4 | Testnet congestion: reset script, three takes, backup recorder | `demo/reset.ts` | n/a | PENDING | Takes not recorded |
-| 19.RK5 | "Just monitoring": hero shot is a refused CCIP message | Attack Lab | n/a | PENDING | Needs a real refused `ccipSend` on testnet (15.DS5) |
+| 19.RK4 | Testnet congestion: reset script, three takes, backup recorder | `demo/reset.ts` | n/a | PENDING | Deferred by product owner (demo video work paused until the owner asks); reset measured at 1426.5 s on testnets (15.REC1) |
+| 19.RK5 | "Just monitoring": hero shot is a refused CCIP message | Attack Lab | n/a | PENDING | Real `ccipSend` refusal is coded in `demo/src/attack.ts`; not yet recorded on testnet (5.B5, 15.DS5) |
 | 19.RK6 | Someone ships the same idea: ship first, publish the spec | n/a | n/a | PENDING | Submission |
 | 19.RK7 | Team split with another build: decide before hour 0 | n/a | one repo, one project | DONE | |
 | 19.OQ1 | Steps to require our CCV on lanes; aggregator onboarding | `docs/research/ccv.md` section 5, `ccv/STATUS.md` | n/a | DONE | Answered from docs: onchain steps self-serve, indexer onboarding by email; mentor confirmation still in HUMAN_TASKS |
@@ -644,33 +650,41 @@ Each is deliberate and documented in the linked source.
 | D20 | Testnet ledgers are in `simulation` forwarder mode (Chainlink `MockKeystoneForwarder`) | CRE deploy access not enabled; simulation broadcasts through the mock | `deployments/testnet-*.raw.json` `forwarderMode` |
 | D21 | Registry timelock 600 s on testnet | PRD allows 10 minutes for the testnet demo | onchain `timelockSeconds() = 600` |
 | D22 | Cut list applied out of top-down order: items 4 (LayerZero adapter) and 5 (4-cell committee) are cut while items 1 to 3 shipped | Items 1 to 3 were cheap and already built; items 4 and 5 were stretch goals in the PRD itself (adapter table "Stretch at hackathon", deployment plan step 5 "if time allows") | PRD sections 9, 10, 16 |
+| D23 | W4 "reload active specs" checks the registry's `activeSpecHash` on every run and raises DRIFT `SPEC_MISMATCH` when it differs from the compiled spec; it does not hot-swap configs, which `gen-config` regenerates from the active spec | CRE workflow configs are fixed per deployment, and a workflow that silently changed its own rules would defeat the Safe plus timelock | `workflows/src/w4.ts`; commit `89f8e2e` |
 
 ## Pending work (hackathon scope)
 
-Ordered by impact on the demo.
+Ordered by impact on the demo. Done since 2026-10-05: spec activation on testnet, staging simulation, Vercel deploys,
+the full Playwright run, axe and keyboard suites, sourced Ops figures, W4 gaps, PoR read, automatic backtest, notifier
+(PagerDuty, deficit, offending tx, narrative), Topology Scout wiring, spec diff alert, the 2.M2 latency measurement.
 
-1. **Activate kETH on testnet**: issuer Safe proposes and activates spec hash `0x22c75309...5dfe` (`demo spec --network testnet`), then W2 baseline epochs so the ledgers leave UNKNOWN (2.G4, 6.LC4).
-2. **Staging simulation** against the deployed testnet contracts, recorded in SIM_LOG (8.C1b, 16.TM4).
-3. **Kelp Replay on testnets**: `demo e2e --network testnet` three times with explorer links, reset timing recorded (1.R6, 2.G4, 16.HG3, 16.NC7, 17.TL7, 17.DOD2, 15.REC1).
-4. **Real CCIP refusal**: attacker `ccipSend` through the router so the refusal is a failed CCIP transaction; replace the placeholder CCIP explorer link; assert Δ = -116,500 after the post-attack epoch (5.B5, 5.B7, 15.DS5, 19.RK5).
-5. **Flow A on testnet**: a real kETH CCIP transfer with PASS (5.A1).
-6. **Mission Control on Vercel** with the API, read-only, "Replay last incident" (5.C8, 15.SUB2, 16.TM7).
-7. **Playwright**: run every suite and keep the report (17.TL9); add contrast/axe and keyboard checks (12.A1, 12.A2); link or label Ops stats (17.DOD3).
-8. **CCV attestation path** (only if time allows): deploy the CCV kit resolver and verifier, register the signer, `applyCCVConfigUpdates` on the kETH pools, expose the aggregator over TLS, run "test your setup" (9.D1, 9.D2, 9.D4, 9.FB2, 9.H5).
-9. **Measurements**: Loop breach to BROKEN latency (2.M2), real-history backtest with zero false BROKEN (2.M3, 3.S1, 6.LC3), Judge latency with keyed RPCs (2.M4), onboarding time (2.M6).
-10. **Workflow gaps**: W4 spec reload, pool and peer scans, issuer notification (6.LC6, 8.W4.1-3); PoR read (8.W2.4); spec fields wired into deploy (6.K4); automatic backtest in the wizard (11.SC.F2).
-11. **Notifier**: PagerDuty channel, configure a webhook, post the narrative, include deficit and offending tx (5.C9, 3.S5, 11.N4).
-12. **Topology Scout** wired into Onboarding (11.TS, 16.CL1); spec-proposal diff alert in the UI (14.T7).
-13. **Nice-to-have**: held-message replay with Safe approval (3.N1); holder Telegram subscription (3.N2).
-14. **Submission**: deck (15.DK1-8, 15.DS1-8), recording (15.REC2-4, 2.G5, 3.P7), push the repo (15.SUB1), uploads and both track submissions before the deadline (15.SUB3-5, 2.G1, 16.TM1, 16.HG4-5, 19.RK4, 19.RK6), 10.SR1 rebasing shares end to end.
+1. **Kelp Replay on testnets**: a passing `demo e2e --network testnet`, three times, with explorer links (1.R6, 2.G4,
+   16.HG3, 16.NC7, 17.TL7, 17.DOD2). The pipeline pieces already ran on testnets (Loop BREACH, W3 quarantine, Safe
+   resolution, RECOVERY_CHECK); a 3-run series was in progress at audit time (`demo/logs/series.txt`).
+2. **Real CCIP refusal recorded**: the coded `Router.ccipSend` refusal run on testnet (5.B5 note, 15.DS5, 19.RK5).
+3. **Flow A on testnet**: a real kETH CCIP transfer with PASS (5.A1).
+4. **Live read model**: keep the indexer running against testnets so the live Mission Control and "Replay last
+   incident" show the testnet incidents (15.SUB2, 16.TM7).
+5. **W1 green on staging** recorded in SIM_LOG (16.TM4).
+6. **Reset under 3 minutes on testnets**: measured 1426.5 s, dominated by finality waits (15.REC1).
+7. **Every number linked**: extend the Ops sweep to Mission Control and Incident Room (17.DOD3).
+8. **CCV attestation path** (only if time allows): deploy the CCV kit resolver and verifier, register the signer,
+   `applyCCVConfigUpdates` on the kETH pools, expose the aggregator over TLS, run "test your setup" (9.D1, 9.D2, 9.D4,
+   9.FB2, 9.H5).
+9. **Measurements**: real-history backtest with zero false BROKEN (2.M3, 3.S1, 6.LC3), Judge latency with keyed RPCs
+   (2.M4), onboarding time (2.M6).
+10. **Engine gaps**: spec fields wired into deploy (6.K4); rebasing shares end to end (10.SR1).
+11. **Nice-to-have**: held-message replay execution with Safe approval (3.N1); holder Telegram subscription (3.N2).
+12. **Deferred by product owner**: demo video and its use in the deck (2.G5, 15.DS1-8, 15.DK4, 15.SUB3, 15.REC2-4,
+    16.TM1, 19.RK4). The deck generator and an 8-slide `media/deck/KIRCHHOFF.pptx` exist.
+13. **Submission**: both track submissions before the deadline (2.G1, 15.SUB4, 15.SUB5, 16.HG4, 16.HG5, 19.RK6).
 
 ## Pending measurement
 
-- Loop Rule breach to BROKEN onchain, in seconds (2.M2)
 - Zero false BROKEN over the real kETH history (2.M3)
 - Policy hook p99 with real RPC providers under load (2.M4)
 - Spec Copilot onboarding time for kETH (2.M6)
-- `demo/reset.ts` wall time on testnets (15.REC1)
+- Loop Rule breach to BROKEN on public testnets (measured on Anvil only: 2 to 4 s after confidence, 2.M2)
 
 ## Counting
 

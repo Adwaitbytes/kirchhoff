@@ -16,6 +16,18 @@ It refuses a token transfer when the token's supply stops adding up across chain
 >    workflows run with `cre workflow simulate`, which is the path PRD section 8 sanctions. Simulation reports reach
 >    the ledgers through Chainlink's `MockKeystoneForwarder`, so the testnet ledgers are in `simulation` forwarder mode.
 
+## Live
+
+| What | URL |
+| --- | --- |
+| Mission Control (read-only, Vercel `sin1`) | https://kirchhoff-two.vercel.app |
+| Public API (Vercel `sin1`, SSE stream) | https://kirchhoff-api.vercel.app (`/healthz`, `/v1/tokens`, `/v1/tokens/kETH/status`) |
+| Repository | https://github.com/Adwaitbytes/kirchhoff |
+| CI (typecheck, lint, tests with a Postgres 17 service, forge) | [GitHub Actions](https://github.com/Adwaitbytes/kirchhoff/actions), green on `6ad7ab8` ([run 37393797827](https://github.com/Adwaitbytes/kirchhoff/actions/runs/37393797827)) |
+
+Both deployments answered with `x-vercel-id: sin1` on 2026-10-06. The live read model is a mirror of the testnet
+ledgers and was last indexed at Sepolia block 11850609, before the testnet incidents below.
+
 ## Contents
 
 - [The problem](#the-problem)
@@ -23,6 +35,7 @@ It refuses a token transfer when the token's supply stops adding up across chain
 - [Architecture](#architecture)
 - [How we use Chainlink CRE and CCIP](#how-we-use-chainlink-cre-and-ccip)
 - [Deployed contracts (Testnet simulation)](#deployed-contracts-testnet-simulation)
+- [Testnet transactions (Testnet simulation)](#testnet-transactions-testnet-simulation)
 - [CRE workflows](#cre-workflows)
 - [Repository layout](#repository-layout)
 - [Quickstart (local)](#quickstart-local)
@@ -143,9 +156,9 @@ Four TypeScript workflows (`@chainlink/cre-sdk` 1.23.0, CRE CLI v1.36.0) do all 
 | Workflow | Triggers | CRE capabilities used | Writes (via `writeReport` to the forwarder) |
 | --- | --- | --- | --- |
 | W1 Junction Watch | EVM Log trigger per chain on every credit event (WeakBridge / HomeEscrowAdapter `Released`, CCIP OffRamp `ExecutionStateChanged`) | `headerByNumber` (finalized pin), `callContract` (`debitOf` at the pin, `isConsumed`), `filterLogs` (evidence window), `getTransactionReceipt` (CCIP credits) | `BREACH` to the ledger on all three chains in the same run |
-| W2 Loop Ledger | Cron `*/30 * * * * *` plus EVM Log triggers on supply-changing `Transfer` events | `headerByNumber` per chain, one Multicall3 `callContract` per chain at the pinned block, `filterLogs` for in-flight matching | `EPOCH` (CONSERVED or DRIFT, settled ids), `BREACH` (`LOOP_DEFICIT`), `RECOVERY_CHECK` |
+| W2 Loop Ledger | Cron `*/30 * * * * *` plus EVM Log triggers on supply-changing `Transfer` events | `headerByNumber` per chain, one Multicall3 `callContract` per chain at the pinned block (incl. the Proof of Reserve `latestRoundData` when the spec has a feed), `filterLogs` for in-flight matching | `EPOCH` (CONSERVED or DRIFT, settled ids), `BREACH` (`LOOP_DEFICIT`, `RESERVE_SHORTFALL`), `RECOVERY_CHECK` |
 | W3 Responder | EVM Log trigger on `BreachRecorded` (home ledger) | Multicall3 `callContract`, HTTP capability with `Idempotency-Key` = incident id, CRE secrets | `QUARANTINE_APPLIED` (tainted recipients) on every ledger whose active incident it is |
-| W4 Topology Watch | EVM Log trigger on `SpecActivated`, Cron every 10 minutes, `RoleGranted(MINTER_ROLE)` on the remotes | `filterLogs` over `RoleGranted`, Multicall3 `hasRole` | `EPOCH` DRIFT with `SPEC_MISMATCH` when a minter outside the spec appears |
+| W4 Topology Watch | EVM Log trigger on `SpecActivated`, Cron every 10 minutes, `RoleGranted(MINTER_ROLE)` on the remotes | `filterLogs` over `RoleGranted`, Multicall3 `hasRole`, registry `activeSpecHash`, TokenAdminRegistry `getPool`, pool `getRemotePools`, HTTP capability with CRE secrets | `EPOCH` DRIFT with `SPEC_MISMATCH` when the active spec differs from the compiled one, or a minter, pool or peer outside the spec appears; pages the issuer once per drift |
 
 Reports reach `ConservationLedger.onReport(metadata, report)` only through the `KeystoneForwarder`
 (`MockKeystoneForwarder` in simulation). `CREReceiver` keeps Chainlink's `ReceiverTemplate` metadata decoding and
@@ -228,9 +241,32 @@ kETH `tokenId` = `keccak256("kETH")` = `0xe7cbc0ff4035309f71987d099a88ed33ef6bfd
 
 Same-looking addresses on different chains are different contracts: the deployer's nonces line up across chains.
 
-**Onchain state today (read 2026-10-05 with `cast call ... statusOf(tokenId)`):** all three ledgers report
-`UNKNOWN` with no epoch yet, and the registry has no active kETH spec (`activeSpecHash` is zero). The testnet Kelp
-Replay has not been run yet; see [PRD_TRACEABILITY.md](PRD_TRACEABILITY.md) "Pending work".
+**Onchain state:** the issuer Safe activated kETH spec `0x22c75309...5dfe` in Sepolia tx
+[`0x43b895d4...0b87`](https://sepolia.etherscan.io/tx/0x43b895d497415fb985b90fcc18032395d465868ac3eef2f07c8cc22f3e740b87). The ledgers have since been
+CONSERVED, BROKEN, QUARANTINED, RECOVERING and CONSERVED again (next section). A full passing `demo e2e --network
+testnet` run has not been recorded yet; see [PRD_TRACEABILITY.md](PRD_TRACEABILITY.md) "Pending work".
+
+## Testnet transactions (Testnet simulation)
+
+Every write below is a CRE report from `cre workflow simulate --broadcast` through Chainlink's
+`MockKeystoneForwarder`, or an issuer Safe transaction. Sources: [workflows/SIMULATION_LOG.md](workflows/SIMULATION_LOG.md)
+"Staging", `demo/logs/testnet-run1c.log`, `demo/logs/testnet-reset0.log`, and `cast logs` of the ledgers'
+`StatusChanged` events (read 2026-10-06).
+
+| Step | Ethereum Sepolia | Arbitrum Sepolia | Base Sepolia | Source |
+| --- | --- | --- | --- | --- |
+| First W2 EPOCH, CONSERVED, Δ = 0 | [`0x76ee71ed...c531`](https://sepolia.etherscan.io/tx/0x76ee71edfbec4134d5a9ee230048f0ff3ae6cee91fa5d2ce1de26ef38919c531) | [`0x3b978a23...4f40`](https://sepolia.arbiscan.io/tx/0x3b978a2381ca4418832d9d53923ed991eb21b1a365e2a63e3c64cf1ee2b14f40) | [`0x3502300f...9f77`](https://sepolia.basescan.org/tx/0x3502300f5d082a9e50f8e1e2f47acac84f0a8609b4e499c5934f6c1394599f77) | SIMULATION_LOG.md |
+| W2 Loop Rule BREACH, `LOOP_DEFICIT`, Δ = -116,500 kETH | [`0x6bb14ec7...b02d`](https://sepolia.etherscan.io/tx/0x6bb14ec73e263eea554154feda635f026b13fcfad753bac8a290a6b98f0ab02d) | [`0x64801650...63ca`](https://sepolia.arbiscan.io/tx/0x648016504d042e63582bef6e5167aabf2c18b295b65775c03ca1de87e90563ca) | [`0x54450b7f...b1a4`](https://sepolia.basescan.org/tx/0x54450b7feb0294c3fda9f9c4e04570d327e2d55bfe41501c07fe1c90a495b1a4) | testnet-run1c.log |
+| W3 `QUARANTINE_APPLIED` (BROKEN to QUARANTINED) | [`0x2c1d6fb1...8940`](https://sepolia.etherscan.io/tx/0x2c1d6fb16209dd30636cc59847900a1ef8de82d78bae4c980f1ecf4f9f2e8940) | [`0x41adcd13...dd03`](https://sepolia.arbiscan.io/tx/0x41adcd136a8b19d08d9adfcf081a99ae76265645b1de4df574844f8346fddd03) | [`0x61eb71d2...7a0a`](https://sepolia.basescan.org/tx/0x61eb71d2ab7f6b690700471fa085a40e0dc524d85de12e1e72546485c71c7a0a) | `cast logs StatusChanged` |
+| Issuer Safe (2 of 3) resolves the incident (QUARANTINED to RECOVERING) | [`0x40c05574...bbc8`](https://sepolia.etherscan.io/tx/0x40c05574e0d8089d5c993a11e2dea3e273273d01dbf4fd3be9de7ad70c56bbc8) | [`0x30e614b9...4c0c`](https://sepolia.arbiscan.io/tx/0x30e614b9477d03340e65fb1b7ace966585658e5c192de74edf14a0a7fcc04c0c) | [`0xfde237b6...2c1b`](https://sepolia.basescan.org/tx/0xfde237b6f0aa2fa293902f9dfc5d47de1a2d8555d124d83ee47b9527e3d32c1b) | testnet-reset0.log |
+| Return 116,500 kETH to the escrow | [`0x181a43b9...c933`](https://sepolia.etherscan.io/tx/0x181a43b99a090e9c4b897bea05f80797edccb44f1efe1f0b1664b21dd871c933) | | | testnet-reset0.log |
+| W2 `RECOVERY_CHECK`, back to CONSERVED | [`0xdae3a5e2...95f6`](https://sepolia.etherscan.io/tx/0xdae3a5e2c164256c0318327cae979ced593d774c8513e0650e574ab55c7195f6) | [`0x6921b7f9...3b81`](https://sepolia.arbiscan.io/tx/0x6921b7f91f02c48fb3e16ac92015f4817a13b88c031668e515c0e04892c73b81) | [`0x16eb636d...3c3e`](https://sepolia.basescan.org/tx/0x16eb636d38901341cfcad39b2640e4c99190a806772363bdee85d39f02193c3e) | testnet-reset0.log |
+
+On Sepolia the ledger had already turned BROKEN in an earlier CRE report,
+[`0x7c368432...b4a2`](https://sepolia.etherscan.io/tx/0x7c368432fce00fc809a8d0e2064bf6d073b37aec5c8fefc71c20d8a76661b4a2); the BREACH above is idempotent per
+incident there (Deviation D13). The e2e run that wrote these BREACHes failed its own baseline assert: an earlier attack
+run had already released 116,500 kETH and died before containment; commit `6ad7ab8` makes `reset` contain
+such dangling incidents first. The forged release itself and the CCIP refusal have no recorded testnet log yet.
 
 ## CRE workflows
 
@@ -329,8 +365,17 @@ make deploy-testnets          # idempotent: reuses every recorded address that s
 pnpm --filter @kirchhoff/demo spec --network testnet      # issuer Safe proposes and activates the kETH spec (10 min timelock)
 pnpm --filter @kirchhoff/workflows gen-config --target staging
 pnpm --filter @kirchhoff/demo seed --network testnet
-make e2e                      # demo e2e --network testnet: BREACH on 3 chains, CCIP refusal, Guard and borrow reverts, incident
-make reset
+make e2e                      # demo e2e --network testnet: resets first when it starts from a contained state, then BREACH on 3 chains, CCIP refusal, Guard and borrow reverts, Δ = -116,500 kETH
+make reset                    # contains any dangling incident, Safe resolutions, rebalance, RECOVERY_CHECK
+```
+
+Optional: set `ALCHEMY_API_KEY` in `.env`. CRE simulation then tries the keyed Alchemy endpoint first, before
+publicnode, the official chain RPCs and the Tenderly gateway; keyless endpoints rate-limit parallel reads with HTTP
+429 (`demo/src/cre.ts`). To stand in for the DON cron while deploy access is pending, the gas-capped runner triggers
+W2 on an interval and W1 / W3 on new credit and breach logs:
+
+```bash
+pnpm --filter @kirchhoff/workflows runner --target staging --interval 90 --max-sepolia-eth 0.02 [--rounds N]
 ```
 
 Every step prints the explorer link of its transaction. Pacing: a finalized CCIP message on Ethereum Sepolia reaches
@@ -338,25 +383,28 @@ a CCV verifier roughly 13 to 17 minutes after the send ([docs/research/ccip.md](
 
 ## Test results
 
-Measured on 2026-10-05 on the current working tree (`pnpm -r --no-bail test`, `pnpm --filter @kirchhoff/engine
-coverage`, `cd contracts && forge test`). All green.
+TypeScript and Foundry counts are from the green GitHub CI run
+[37393797827](https://github.com/Adwaitbytes/kirchhoff/actions/runs/37393797827) on commit `6ad7ab8` (2026-10-06,
+`pnpm -r test` with a Postgres 17 service, the engine coverage gate, `forge test -vv`). Playwright counts are from the
+local report of 2026-10-06 (commit `230054a`); Playwright does not run in CI.
 
 | Package | Command | Result |
 | --- | --- | --- |
-| Engine | `pnpm --filter @kirchhoff/engine test` | 249 passed (14 files) |
-| Engine coverage | `pnpm --filter @kirchhoff/engine coverage` | 100% statements (894/894), branches (586/586), functions (203/203), lines (736/736) |
+| Engine | `pnpm --filter @kirchhoff/engine test` | 251 passed (14 files) |
+| Engine coverage | `pnpm --filter @kirchhoff/engine coverage` | 100% statements, branches, functions and lines (CI gate); 2026-10-05 local run: 894/894, 586/586, 203/203, 736/736 |
 | Engine property test | `engine/test/property.test.ts` "holds over 10,000 random histories" | 10,000 runs (`numRuns: 10_000`): every forgery flagged, zero false flags on valid traffic |
 | Contracts | `cd contracts && forge test` | 150 passed, 0 failed (10 suites: unit, fuzz at 1024 runs, invariants at 256 runs x depth 64, real KeystoneForwarder signature path) |
-| Workflows | `pnpm --filter @kirchhoff/workflows test` | 35 passed |
-| Workflows, six PRD scenarios | `pnpm --filter @kirchhoff/workflows scenarios` (`cre workflow simulate --broadcast` on 3 Anvil chains) | 6 / 6 PASS ([SIMULATION_LOG.md](workflows/SIMULATION_LOG.md), run 2026-10-03) |
+| Workflows | `pnpm --filter @kirchhoff/workflows test` | 54 passed |
+| Workflows, six PRD scenarios plus the latency run | `pnpm --filter @kirchhoff/workflows scenarios` (`cre workflow simulate --broadcast` on 3 Anvil chains) | 7 / 7 PASS ([SIMULATION_LOG.md](workflows/SIMULATION_LOG.md), run 2026-10-05) |
+| Workflows on public testnets | `cre workflow simulate --target staging` | W2 `--broadcast` EPOCH on 3 testnets; W4 cron and `SpecActivated` `findings=0` at 14/15 reads ([SIMULATION_LOG.md](workflows/SIMULATION_LOG.md) "Staging") |
 | Judge | `pnpm --filter @kirchhoff/judge test` | 96 passed, 3 skipped (the skipped ones need `JUDGE_LIVE=1` and live Sepolia RPCs) |
 | AI | `pnpm --filter @kirchhoff/ai test` | 33 passed |
-| API | `pnpm --filter @kirchhoff/api test` | 20 passed |
-| Indexer | `pnpm --filter @kirchhoff/indexer test` | 8 passed |
+| API | `pnpm --filter @kirchhoff/api test` | 28 passed |
+| Indexer | `pnpm --filter @kirchhoff/indexer test` | 10 passed |
 | SDK | `pnpm --filter @kirchhoff/sdk test` | 8 passed |
 | MCP | `pnpm --filter @kirchhoff/mcp test` | 6 passed |
 | Demo | `pnpm --filter @kirchhoff/demo test` | 8 passed |
-| Web | `pnpm --filter @kirchhoff/web test` (typecheck) | passes; Playwright suites in `web/e2e` (last recorded report covers the console-error suite only, 13 / 13) |
+| Web | Playwright, `web/e2e` (12 specs) | 124 / 124 passed: Mission Control, Incident Room, Attack Lab, Onboarding, Ops source links, stage snapshots, responsive, axe WCAG 2.2 AA on 11 routes in both themes, keyboard-only navigation |
 | AI evals | `ai/eval/run.ts` ([RESULTS.md](ai/eval/RESULTS.md), 2026-10-05) | provenance 100%, field accuracy 19 / 19, narrator citations 100%, prompt injection 0 of 10 misuse |
 | No AI in veto path | `bash scripts/no-ai-in-veto-path.sh` | OK |
 
@@ -372,7 +420,9 @@ Every number here was measured; the file that holds the raw output is linked.
 | Judge debit lookup through two keyless public Sepolia RPCs | 397 to 677 ms per message | [judge/load/RESULTS.md](judge/load/RESULTS.md) "Against real testnet RPCs" |
 | Judge under chaos (provider killed, W2 paused) | every answer inside 11 ms, PENDING as HTTP 503 | [judge/CHAOS.md](judge/CHAOS.md) |
 | Forged credit to BREACH | same W1 run as the credit event (scenario 3) | [workflows/SIMULATION_LOG.md](workflows/SIMULATION_LOG.md) |
-| Loop Rule breach to BROKEN onchain, in seconds | pending measurement | |
+| Loop Rule breach to BROKEN onchain (scenario 7, Anvil, 1 s blocks) | BREACH mined 2 / 3 / 4 s after confidence on home / arb / base; single-node simulation, excludes DON trigger delivery | [workflows/SIMULATION_LOG.md](workflows/SIMULATION_LOG.md) scenario 7 |
+| Testnet `reset` (Safe resolutions, rebalance, timelock, RECOVERY_CHECK on 3 chains) | 1426.5 s, over the 3-minute target; most of it waiting for Sepolia, Arbitrum and Base finality | `demo/logs/testnet-reset0.log` |
+| Loop Rule breach to BROKEN on public testnets | pending measurement | |
 | Spec Copilot onboarding time for kETH | pending measurement | |
 
 ## Security model
@@ -418,6 +468,10 @@ state, and a deterministic Judge that each CCV cell runs independently.
   `contracts/test/ForwarderIntegration.t.sol`.
 - **Judge latency target.** p99 under 300 ms at 100 rps is met with stub RPCs and missed on a contended laptop with
   Anvil backends. Both results are reported.
+- **Live read model lags.** The live Mission Control and API serve the indexed testnet mirror; the indexer is not
+  running continuously, so the live pages can trail the ledgers (last indexed Sepolia block 11850609).
+- **Notifier.** Telegram, Slack and PagerDuty pages are tested against mocked endpoints; no channel secrets are
+  configured, so no live page has been delivered.
 - **AI** never decides a verdict. The AI provider used for the evals is Claude through OpenRouter, temperature 0.
 
 ## Docs
