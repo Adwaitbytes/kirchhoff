@@ -63,6 +63,16 @@ export function addr(raw: RawDeployment, key: string): Address {
   return getAddress(value);
 }
 
+/**
+ * CCIP TokenAdminRegistry for W4's pool checks (engine ChainDeployment.ccip.tokenAdminRegistry). Deploy.s.sol records
+ * the zero address on Anvil, which has none, so the field is omitted there.
+ */
+function tokenAdminRegistry(raw: RawDeployment): { tokenAdminRegistry?: Address } {
+  const value = raw.ccipTokenAdminRegistry;
+  if (typeof value !== "string" || !isAddress(value) || /^0x0{40}$/i.test(value)) return {};
+  return { tokenAdminRegistry: getAddress(value) };
+}
+
 /** The full three-chain set; throws if any chain is missing (run deploy-all first). */
 export type DeploymentSet = Readonly<Record<ChainRole, RawDeployment>>;
 
@@ -103,7 +113,7 @@ export function toEngineDeployments(n: Network, set: DeploymentSet): Deployments
       quarantine: addr(raw, "quarantineController"),
       feed: addr(raw, "conservationFeed"),
       ...(isHome ? { registry: addr(raw, "kirchhoffRegistry") } : {}),
-      ccip: { onRamp: addr(raw, "ccipOnRamp"), offRamp: addr(raw, "ccipOffRamp") },
+      ccip: { onRamp: addr(raw, "ccipOnRamp"), offRamp: addr(raw, "ccipOffRamp"), ...tokenAdminRegistry(raw) },
       tokens,
     };
   }

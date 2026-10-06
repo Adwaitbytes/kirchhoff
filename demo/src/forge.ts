@@ -59,7 +59,7 @@ export type ScriptOptions = {
 
 export type ScriptResult = RunResult & { estimatedGas: bigint | null; estimatedEth: string | null };
 
-const RETRYABLE = /nonce|rate limit|exceeds defined limit|429|too many requests|timed out|connection reset/i;
+const RETRYABLE = /nonce|rate limit|exceeds defined limit|429|too many requests|timed out|connection reset|already modifying recovery state/i;
 
 export async function forgeScript(o: ScriptOptions): Promise<ScriptResult> {
   const build = (rpcUrl: string): string[] => {

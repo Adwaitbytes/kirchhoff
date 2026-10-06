@@ -43,7 +43,7 @@ export async function forgeRelease(ctx: Context, emit: Emit, amount = DEMO_BREAC
 
   const inputs: BreachInputs = { offendingChain: "home", offendingTx: tx.hash, messageId: forgedId, recipient: attacker, amount, reason: Reason.DEBIT_NOT_FOUND };
   const incidentId = incidentIdFor(ctx, inputs);
-  emit({ step: "forge-credit", status: "ok", chain: "home", title: `released ${amount} kETH to attacker with no debit`, txHash: tx.hash, explorerUrl: tx.url, detail: { attacker, forgedId, incidentId } });
+  emit({ step: "forge-credit", status: "ok", chain: "home", title: `released ${(amount / 10n ** 18n).toLocaleString("en-US")} kETH to attacker with no debit`, txHash: tx.hash, explorerUrl: tx.url, detail: { attacker, forgedId, incidentId } });
   return { attacker, amount, forgedId, tx, inputs, incidentId };
 }
 

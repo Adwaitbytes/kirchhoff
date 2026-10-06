@@ -18,6 +18,7 @@
  * reports through each chain's MockKeystoneForwarder (fallback only). Exits non-zero on any failure.
  */
 import { Status } from "@kirchhoff/engine";
+import { keccak256, toHex } from "viem";
 import { ledgerAbi, quarantineAbi } from "./src/abi.ts";
 import { fundIfBelow, hasCode, read } from "./src/chain.ts";
 import { account } from "./src/chain.ts";
@@ -25,7 +26,7 @@ import { main, parseArgs, reportMode } from "./src/cli.ts";
 import { loadContext, type Context } from "./src/context.ts";
 import { log, stepEmitter } from "./src/events.ts";
 import { attemptRefusals, baselineEpoch, deficitEpoch, driveContainment, forgeRelease, hookPayload, refusalBlock, type Emit } from "./src/attack.ts";
-import { resetAll } from "./src/reset.ts";
+import { ledgerStatus, resetAll } from "./src/reset.ts";
 import { ROLES } from "./src/networks.ts";
 
 class AssertionError extends Error {
@@ -75,6 +76,31 @@ async function assertAll(ctx: Context, expected: number, what: string): Promise<
   }
 }
 
+async function anyContained(ctx: Context): Promise<boolean> {
+  for (const role of ROLES) {
+    const s = await ledgerStatus(ctx, role);
+    if (s.status === Status.BROKEN || s.status === Status.QUARANTINED || s.status === Status.RECOVERING || s.frozen) return true;
+  }
+  return false;
+}
+
+const BREACH_RECORDED = keccak256(toHex("BreachRecorded(bytes32,uint16,bytes32,uint64,bytes32,address,uint256)"));
+
+/**
+ * Detection latency on the home ledger, block time to block time: forged release -> first BreachRecorded (W1, the
+ * Junction Rule) and -> last BreachRecorded (W2's LOOP_DEFICIT, the Loop Rule).
+ */
+async function detectionLatency(ctx: Context, releaseBlock: bigint): Promise<{ junctionSeconds: number; loopSeconds: number; junctionTx: string; loopTx: string }> {
+  const home = ctx.chains.home.client;
+  const logs = (await home.getLogs({ address: ctx.at("home", "conservationLedger"), fromBlock: releaseBlock, toBlock: "latest" })).filter((l) => l.topics[0]?.toLowerCase() === BREACH_RECORDED);
+  const first = logs[0];
+  const last = logs.at(-1);
+  if (first === undefined || last === undefined) throw new AssertionError("no BreachRecorded after the attack");
+  const at = async (n: bigint): Promise<bigint> => (await home.getBlock({ blockNumber: n })).timestamp;
+  const t0 = await at(releaseBlock);
+  return { junctionSeconds: Number((await at(first.blockNumber)) - t0), loopSeconds: Number((await at(last.blockNumber)) - t0), junctionTx: first.transactionHash, loopTx: last.transactionHash };
+}
+
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2), { options: ["reports"], flags: ["no-reset"] });
   const mode = reportMode(args);
@@ -100,6 +126,11 @@ async function run(): Promise<void> {
   };
 
   // W2 baseline epoch, then the attack and the Conservation Engine (W1 on the forged Released, W3 on BreachRecorded).
+  // A previous interrupted run can leave an incident open; recover it first so every run starts from a clean circuit.
+  if (await anyContained(ctx)) {
+    log("ledgers start contained from an earlier run; resetting before the baseline");
+    await resetAll(ctx, emit, mode);
+  }
   await baselineEpoch(ctx, emit, mode);
   await assertAll(ctx, Status.CONSERVED, "baseline CONSERVED");
   lap("baselineSeconds");
@@ -124,6 +155,8 @@ async function run(): Promise<void> {
   const delta = /delta=(-?\d+)/.exec(loop)?.[1];
   assert(delta !== undefined && BigInt(delta) === -release.amount, `W2 Loop Rule delta ${delta ?? "missing"}, expected ${-release.amount}`);
   emit({ step: "assert-delta", status: "ok", title: `Loop Rule delta = -${release.amount / 10n ** 18n} kETH`, detail: { delta: delta ?? null } });
+  const latency = await detectionLatency(ctx, release.tx.receipt.blockNumber);
+  emit({ step: "latency", status: "ok", chain: "home", title: `attack -> BROKEN onchain: Junction ${latency.junctionSeconds}s, Loop ${latency.loopSeconds}s`, detail: latency });
   await assertContained(ctx, release.incidentId, attacker, emit);
   lap("refusalsAndDeficitSeconds");
 
