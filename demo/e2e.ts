@@ -132,6 +132,14 @@ async function run(): Promise<void> {
     await resetAll(ctx, emit, mode);
   }
   await baselineEpoch(ctx, emit, mode);
+  // An interrupted run can also leave a forged release on chain that no workflow processed yet: the ledgers still
+  // read CONSERVED, so the check above passes, and this baseline epoch is what catches the deficit. Recover from it
+  // (contain, resolve, rebalance, recovery check) and take the baseline again.
+  if (await anyContained(ctx)) {
+    log("baseline epoch found a deficit left by an earlier run; recovering and retaking the baseline");
+    await resetAll(ctx, emit, mode);
+    await baselineEpoch(ctx, emit, mode);
+  }
   await assertAll(ctx, Status.CONSERVED, "baseline CONSERVED");
   lap("baselineSeconds");
   const release = await forgeRelease(ctx, emit);
