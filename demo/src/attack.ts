@@ -10,7 +10,7 @@ import { breachBody, epochBody, incidentIdFor, quarantineBody, nextEpochId, writ
 import { w1TriggerIndex } from "./cre.ts";
 import { runWorkflow, settle, waitFinalizedPast, type WorkflowRun } from "./engine-run.ts";
 import { ROLES } from "./networks.ts";
-import { type stepEmitter } from "./events.ts";
+import { log, type stepEmitter } from "./events.ts";
 
 export type Emit = ReturnType<typeof stepEmitter>;
 export type ReportMode = "cre" | "direct";
@@ -93,10 +93,16 @@ async function driveViaCre(ctx: Context, emit: Emit, release: ReleaseResult): Pr
   await waitFinalizedPast(ctx, "arb", creditTime);
   // W1 on the forged Released log the HomeEscrowAdapter emitted in the attack tx.
   emit({ step: "breach", status: "started", title: "W1 Junction Watch: cre workflow simulate --broadcast" });
-  const w1run = await runWorkflow(ctx, "w1-junction", w1TriggerIndex(net, ctx.net.chains.home), {
-    txHash: release.tx.hash,
-    eventIndex: logIndex(release.tx.receipt, ctx.at("home", "homeEscrowAdapter"), RELEASED_TOPIC),
-  });
+  const trigger = { txHash: release.tx.hash, eventIndex: logIndex(release.tx.receipt, ctx.at("home", "homeEscrowAdapter"), RELEASED_TOPIC) };
+  // W1 rules only once the claimed source block is final as seen through CRE's own provider, whose finalized head can
+  // trail ours by a few blocks. A DRIFT (PENDING_ATTESTATION) answer means "not final yet": re-evaluate, as the DON
+  // would on its next look, within the spec's match window.
+  let w1run = await runWorkflow(ctx, "w1-junction", w1TriggerIndex(net, ctx.net.chains.home), trigger);
+  for (let attempt = 1; attempt <= 6 && new RegExp(`status=${Status.DRIFT} reason=${Reason.PENDING_ATTESTATION} writes=0`).test(w1run.result.result ?? ""); attempt++) {
+    log(`  W1 reports the source not final yet (DRIFT); re-evaluating in 60s (${attempt}/6)`);
+    await new Promise((r) => setTimeout(r, 60_000));
+    w1run = await runWorkflow(ctx, "w1-junction", w1TriggerIndex(net, ctx.net.chains.home), trigger);
+  }
   const w1 = w1run.result;
   emitWrites(emit, "breach", w1run);
   if (!new RegExp(`status=${Status.BROKEN} reason=${Reason.DEBIT_NOT_FOUND} writes=3`).test(w1.result ?? "")) {
