@@ -15,13 +15,21 @@ export type ContractMeta = {
   /** Free text the explorer shows (verified-source header comments, labels). */
   comments: string | null;
   creator: Address | null;
+  /** Creation transaction, so log scans can start at the contract's first block instead of a fixed window. */
+  creationTx: Hex | null;
 };
+
+/** A contract created directly by an EOA, with the creation transaction as provenance. */
+export type DeployedContract = { address: Address; name: string | null; tx: Hex | null; block: string | null };
 
 export interface Explorer {
   readonly id: string;
   contract(chain: ChainKey, address: Address): Promise<ContractMeta | null>;
-  /** Contracts created by `deployer` on `chain`, newest first. */
-  deployedBy(chain: ChainKey, deployer: Address): Promise<{ address: Address; name: string | null }[]>;
+  /**
+   * Contracts created by `deployer` on `chain`, newest first. Throws when the lookup itself failed,
+   * so "deployed nothing" is never reported for an explorer that did not answer.
+   */
+  deployedBy(chain: ChainKey, deployer: Address): Promise<DeployedContract[]>;
 }
 
 type FetchJson = (url: string, signal: AbortSignal) => Promise<unknown>;
@@ -35,6 +43,53 @@ const defaultFetchJson =
   };
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** Cap on contracts reported per deployer: enough for a full bridge topology, small enough for a prompt. */
+export const MAX_DEPLOYED = 60;
+const TXLIST_PAGE = 1_000;
+const TXLIST_MAX_PAGES = 5;
+
+/**
+ * Contract creations in an Etherscan-compatible `account/txlist` page (Etherscan V2 and Blockscout's
+ * RPC API share the shape: `to` is "" and `contractAddress` is set on a creation). Failed creations
+ * (isError "1") left no code and are skipped. Returns null when the body is not a txlist answer.
+ */
+export function creationsFromTxlist(body: unknown, deployer: Address): { creations: DeployedContract[]; rows: number } | null {
+  if (!isObj(body)) return null;
+  // Both APIs answer "no transactions" with status "0" and an empty array (or a message string).
+  if (body.status === "0" && typeof body.message === "string" && /no transactions found/i.test(body.message)) return { creations: [], rows: 0 };
+  if (!Array.isArray(body.result)) return null;
+  const creations: DeployedContract[] = [];
+  for (const tx of body.result) {
+    if (!isObj(tx)) continue;
+    const isCreation = (tx.to === "" || tx.to === null) && typeof tx.contractAddress === "string" && /^0x[0-9a-fA-F]{40}$/.test(tx.contractAddress);
+    if (!isCreation || tx.isError === "1") continue;
+    if (typeof tx.from === "string" && tx.from.toLowerCase() !== deployer.toLowerCase()) continue;
+    creations.push({
+      address: (tx.contractAddress as string).toLowerCase() as Address,
+      name: null,
+      tx: typeof tx.hash === "string" && /^0x[0-9a-fA-F]{64}$/.test(tx.hash) ? (tx.hash.toLowerCase() as Hex) : null,
+      block: typeof tx.blockNumber === "string" ? tx.blockNumber : null,
+    });
+  }
+  return { creations, rows: body.result.length };
+}
+
+/** Pages a txlist endpoint newest-first until a short page; throws on a non-txlist answer. */
+async function pagedCreations(get: FetchJson, urlFor: (page: number) => string, deployer: Address, label: string): Promise<DeployedContract[]> {
+  const out: DeployedContract[] = [];
+  for (let page = 1; page <= TXLIST_MAX_PAGES && out.length < MAX_DEPLOYED; page++) {
+    const body = await get(urlFor(page), AbortSignal.timeout(12_000));
+    const parsed = creationsFromTxlist(body, deployer);
+    if (!parsed) {
+      const msg = isObj(body) && typeof body.result === "string" ? body.result : isObj(body) && typeof body.message === "string" ? body.message : "unexpected response";
+      throw new Error(`${label} txlist: ${msg.slice(0, 120)}`);
+    }
+    out.push(...parsed.creations);
+    if (parsed.rows < TXLIST_PAGE) break;
+  }
+  return out.slice(0, MAX_DEPLOYED);
+}
 
 /** Header comment lines of verified source: the place injected instructions usually hide. */
 function headerComments(source: unknown): string | null {
@@ -64,19 +119,12 @@ export class BlockscoutExplorer implements Explorer {
       source: "blockscout",
       comments: isObj(sc) ? headerComments(sc.source_code) : null,
       creator: isObj(addr) && typeof addr.creator_address_hash === "string" ? (addr.creator_address_hash.toLowerCase() as Address) : null,
+      creationTx: isObj(addr) && typeof addr.creation_transaction_hash === "string" && /^0x[0-9a-fA-F]{64}$/.test(addr.creation_transaction_hash) ? (addr.creation_transaction_hash.toLowerCase() as Hex) : null,
     };
   }
-  async deployedBy(chain: ChainKey, deployer: Address): Promise<{ address: Address; name: string | null }[]> {
+  deployedBy(chain: ChainKey, deployer: Address): Promise<DeployedContract[]> {
     const base = CHAINS[chain].blockscout;
-    const r = await this.get(`${base}/api?module=account&action=txlist&address=${deployer}&sort=desc&offset=200&page=1`, AbortSignal.timeout(8_000)).catch(() => null);
-    if (!isObj(r) || !Array.isArray(r.result)) return [];
-    const out: { address: Address; name: string | null }[] = [];
-    for (const tx of r.result) {
-      if (isObj(tx) && typeof tx.contractAddress === "string" && tx.contractAddress.length === 42 && (tx.to === "" || tx.to === null)) {
-        out.push({ address: tx.contractAddress.toLowerCase() as Address, name: null });
-      }
-    }
-    return out.slice(0, 40);
+    return pagedCreations(this.get, (page) => `${base}/api?module=account&action=txlist&address=${deployer}&sort=desc&offset=${TXLIST_PAGE}&page=${page}`, deployer, "blockscout");
   }
 }
 
@@ -103,12 +151,38 @@ export class EtherscanExplorer implements Explorer {
       }
     }
     const name = typeof first.ContractName === "string" && first.ContractName.length > 0 ? first.ContractName : null;
-    return { name, verified: name !== null, abi, source: "etherscan", comments: headerComments(first.SourceCode), creator: null };
+    return { name, verified: name !== null, abi, source: "etherscan", comments: headerComments(first.SourceCode), creator: null, creationTx: null };
   }
-  deployedBy(): Promise<{ address: Address; name: string | null }[]> {
-    // Base Sepolia account endpoints need a paid plan (docs/research/explorers.md); Blockscout covers this.
-    return Promise.resolve([]);
+  deployedBy(chain: ChainKey, deployer: Address): Promise<DeployedContract[]> {
+    // account/txlist answers on the free tier for all three testnets (checked live 2026-10-06).
+    const id = CHAINS[chain].testnetChainId;
+    return pagedCreations(
+      this.get,
+      (page) => `https://api.etherscan.io/v2/api?chainid=${id}&module=account&action=txlist&address=${deployer}&startblock=0&endblock=99999999&sort=desc&offset=${TXLIST_PAGE}&page=${page}&apikey=${this.apiKey}`,
+      deployer,
+      "etherscan",
+    );
   }
+}
+
+type Creation = { address: Address; from: Address; tx: Hex; block: string };
+
+const LOCAL_SCAN_MAX_BLOCKS = 200_000n;
+const LOCAL_SCAN_CONCURRENCY = 32n;
+const NAME_LOOKUP_CONCURRENCY = 4;
+
+/** Order-preserving map with at most `limit` calls in flight. */
+async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
 }
 
 type LocalArtifact = { name: string; abi: Abi; runtime: string; immutables: { start: number; length: number }[] };
@@ -123,7 +197,7 @@ export class LocalArtifactExplorer implements Explorer {
   private readonly clients: Partial<Record<ChainKey, PublicClient>>;
   private artifacts: LocalArtifact[] | null = null;
   private readonly outDir: string;
-  private readonly creations = new Map<ChainKey, Promise<{ address: Address; from: Address }[]>>();
+  private readonly creations = new Map<ChainKey, Promise<Creation[]>>();
   private readonly comments: Partial<Record<string, string>>;
 
   constructor(clients: Partial<Record<ChainKey, PublicClient>>, options: { outDir?: string; comments?: Partial<Record<string, string>> } = {}) {
@@ -172,45 +246,58 @@ export class LocalArtifactExplorer implements Explorer {
     if (!code || code === "0x") return null;
     const match = this.load().find((a) => a.runtime.length === code.length && LocalArtifactExplorer.mask(a.runtime, a.immutables) === LocalArtifactExplorer.mask(code, a.immutables));
     const creations = await this.scan(chain);
-    const creator = creations.find((c) => c.address === address.toLowerCase())?.from ?? null;
+    const creation = creations.find((c) => c.address === address.toLowerCase());
     return {
       name: match?.name ?? null,
       verified: match !== undefined,
       abi: match?.abi ?? null,
       source: "local-artifacts",
       comments: this.comments[`${chain}:${address.toLowerCase()}`] ?? null,
-      creator,
+      creator: creation?.from ?? null,
+      creationTx: creation?.tx ?? null,
     };
   }
 
-  private scan(chain: ChainKey): Promise<{ address: Address; from: Address }[]> {
+  /**
+   * Every contract creation on the chain, newest first. Anvil chains here mine a block per second, so
+   * a fixed recent window misses the deployment blocks near genesis: scan from genesis (bounded) with
+   * a few blocks in flight at a time.
+   */
+  private scan(chain: ChainKey): Promise<Creation[]> {
     const cached = this.creations.get(chain);
     if (cached) return cached;
     const client = this.clients[chain];
     const p = (async () => {
       if (!client) return [];
       const head = await client.getBlockNumber();
-      const out: { address: Address; from: Address }[] = [];
-      const floor = head > 5_000n ? head - 5_000n : 0n;
-      for (let n = head; n >= floor && n >= 0n; n--) {
-        const block = await client.getBlock({ blockNumber: n, includeTransactions: true });
-        for (const tx of block.transactions) {
-          if (tx.to !== null) continue;
-          const receipt = await client.getTransactionReceipt({ hash: tx.hash });
-          if (receipt.contractAddress) out.push({ address: receipt.contractAddress.toLowerCase() as Address, from: tx.from.toLowerCase() as Address });
+      const floor = head > LOCAL_SCAN_MAX_BLOCKS ? head - LOCAL_SCAN_MAX_BLOCKS : 0n;
+      const out: Creation[] = [];
+      for (let from = floor; from <= head; from += LOCAL_SCAN_CONCURRENCY) {
+        const numbers: bigint[] = [];
+        for (let n = from; n < from + LOCAL_SCAN_CONCURRENCY && n <= head; n++) numbers.push(n);
+        const blocks = await Promise.all(numbers.map((blockNumber) => client.getBlock({ blockNumber, includeTransactions: true })));
+        for (const block of blocks) {
+          for (const tx of block.transactions) {
+            if (tx.to !== null) continue;
+            const receipt = await client.getTransactionReceipt({ hash: tx.hash });
+            if (receipt.contractAddress && receipt.status === "success") {
+              out.push({ address: receipt.contractAddress.toLowerCase() as Address, from: tx.from.toLowerCase() as Address, tx: tx.hash, block: block.number.toString() });
+            }
+          }
         }
-        if (n === 0n) break;
       }
-      return out;
+      return out.reverse();
     })();
+    // A failed scan is not cached, so the next call retries instead of reporting an empty chain forever.
+    p.catch(() => this.creations.delete(chain));
     this.creations.set(chain, p);
     return p;
   }
 
-  async deployedBy(chain: ChainKey, deployer: Address): Promise<{ address: Address; name: string | null }[]> {
-    const created = (await this.scan(chain)).filter((c) => c.from === deployer.toLowerCase()).slice(0, 40);
-    const out: { address: Address; name: string | null }[] = [];
-    for (const c of created) out.push({ address: c.address, name: (await this.contract(chain, c.address))?.name ?? null });
+  async deployedBy(chain: ChainKey, deployer: Address): Promise<DeployedContract[]> {
+    const created = (await this.scan(chain)).filter((c) => c.from === deployer.toLowerCase()).slice(0, MAX_DEPLOYED);
+    const out: DeployedContract[] = [];
+    for (const c of created) out.push({ address: c.address, name: (await this.contract(chain, c.address))?.name ?? null, tx: c.tx, block: c.block });
     return out;
   }
 }
@@ -232,11 +319,27 @@ export class CompositeExplorer implements Explorer {
     }
     return first;
   }
-  async deployedBy(chain: ChainKey, deployer: Address): Promise<{ address: Address; name: string | null }[]> {
+  /**
+   * The first explorer that answers with creations wins; unnamed creations are then named from
+   * contract metadata (verified name), so the model can tell a WeakBridge from a token. Throws only
+   * when every explorer failed: an empty answer from a working explorer is a real "none".
+   */
+  async deployedBy(chain: ChainKey, deployer: Address): Promise<DeployedContract[]> {
+    const failures: string[] = [];
+    let answered = false;
     for (const e of this.list) {
-      const r = await e.deployedBy(chain, deployer).catch(() => []);
-      if (r.length > 0) return r;
+      let r: DeployedContract[];
+      try {
+        r = await e.deployedBy(chain, deployer);
+      } catch (err) {
+        failures.push(`${e.id}: ${err instanceof Error ? err.message : String(err)}`);
+        continue;
+      }
+      answered = true;
+      if (r.length === 0) continue;
+      return await mapLimit(r, NAME_LOOKUP_CONCURRENCY, async (c) => (c.name !== null ? c : { ...c, name: (await this.contract(chain, c.address))?.name ?? null }));
     }
+    if (!answered && failures.length > 0) throw new Error(`no explorer answered: ${failures.join("; ").slice(0, 300)}`);
     return [];
   }
 }

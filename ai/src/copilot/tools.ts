@@ -1,7 +1,7 @@
 import { decodeEventLog, keccak256, parseAbi, stringToBytes, toEventSelector, type Abi, type AbiEvent, type AbiFunction, type Address, type Hex, type PublicClient } from "viem";
-import { CHAINS, CHAIN_KEYS, bridgeAbi, ccipAbi, erc20Abi, isChainKey, oftAbi, roleAbi, tokenAdminRegistryAbi, txUrl, addressUrl, type ChainKey, type CopilotTool } from "@kirchhoff/sdk";
+import { CHAINS, CHAIN_KEYS, bridgeAbi, chainBySelector, ccipAbi, erc20Abi, isChainKey, oftAbi, roleAbi, tokenAdminRegistryAbi, txUrl, addressUrl, type ChainKey, type CopilotTool } from "@kirchhoff/sdk";
 import type { ToolDef } from "../provider.ts";
-import type { Explorer } from "./explorer.ts";
+import type { ContractMeta, Explorer } from "./explorer.ts";
 
 /**
  * The seven Spec Copilot tools of PRD section 11, exactly. All are read-only: they read chains and
@@ -45,7 +45,8 @@ export const COPILOT_TOOL_DEFS: readonly (ToolDef & { name: CopilotTool })[] = [
   },
   {
     name: "list_ccip_pools",
-    description: "The CCIP token pool registered for a token in the CCIP TokenAdminRegistry on a chain, with the chain's OnRamp and OffRamp.",
+    description:
+      "The CCIP token pool registered for a token in the CCIP TokenAdminRegistry on a chain, with its lock box and OnRamp/OffRamp, and every remote lane the pool is configured for: remote chain, remote token, remote pools and that chain's ramps, cross-checked on the remote chain. Run it on the canonical token to discover the remotes.",
     parameters: { type: "object", additionalProperties: false, required: ["chain", "token"], properties: { chain: chainParam, token: addressParam } },
   },
   {
@@ -87,6 +88,7 @@ const ROLE_NAMES: Readonly<Record<string, string>> = {
   [keccak256(stringToBytes("BURNER_ROLE"))]: "BURNER_ROLE",
   "0x0000000000000000000000000000000000000000000000000000000000000000": "DEFAULT_ADMIN_ROLE",
 };
+const ROLE_TOPICS: Hex[] = roleAbi.map((e) => toEventSelector(e));
 const EIP1967_IMPL = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
 const typeAndVersionAbi = parseAbi(["function typeAndVersion() view returns (string)", "function getToken() view returns (address)"]);
 
@@ -109,24 +111,64 @@ type SimpleLog = { data: Hex; topics: [Hex, ...Hex[]] | []; blockNumber: bigint;
 
 type RpcLog = { data: Hex; topics: Hex[]; blockNumber: Hex | null; transactionHash: Hex | null };
 
-async function chunkedLogs(c: PublicClient, address: Address, lookback: bigint, topics?: Hex[]): Promise<SimpleLog[]> {
+/** Longest history a log scan covers even when the contract is older (bounds RPC load). */
+const MAX_HISTORY_BLOCKS = 5_000_000n;
+const DEFAULT_LOG_STEP = 9_999n;
+
+/** A smaller getLogs span after a range-limit error ("exceed maximum block range: 50000"), or null to give up. */
+function smallerStep(err: unknown, step: bigint): bigint | null {
+  const msg = err instanceof Error ? err.message : String(err);
+  const limit = /(?:block range|range)[^0-9]{0,40}(\d{3,})/i.exec(msg)?.[1];
+  if (limit !== undefined && BigInt(limit) - 1n < step) return BigInt(limit) - 1n;
+  if (step > DEFAULT_LOG_STEP) return DEFAULT_LOG_STEP;
+  if (step > 999n) return 999n;
+  return null;
+}
+
+/**
+ * Logs of `address` from `from` (its creation block when known, else head - lookback) to head.
+ * Tries the whole span in one request, then narrows to the provider's range limit: role grants on a
+ * remote token happen at deployment, often far outside any fixed recent window.
+ */
+async function chunkedLogs(c: PublicClient, address: Address, lookback: bigint, topics?: (Hex | Hex[] | null)[], createdAt: bigint | null = null): Promise<SimpleLog[]> {
   const head = await c.getBlockNumber();
-  const floor = head > lookback ? head - lookback : 0n;
-  const out: SimpleLog[] = [];
-  const step = 9_999n;
-  for (let to = head; to >= floor; to -= step + 1n) {
-    const from = to - step > floor ? to - step : floor;
-    const logs: RpcLog[] = await c.request({
-      method: "eth_getLogs",
-      params: [{ address, fromBlock: `0x${from.toString(16)}`, toBlock: `0x${to.toString(16)}`, ...(topics ? { topics } : {}) }],
-    });
-    for (const l of logs) {
-      if (l.blockNumber === null || l.transactionHash === null) continue;
-      out.push({ data: l.data, topics: l.topics as SimpleLog["topics"], blockNumber: BigInt(l.blockNumber), transactionHash: l.transactionHash });
+  const windowFloor = head > lookback ? head - lookback : 0n;
+  const historyFloor = head > MAX_HISTORY_BLOCKS ? head - MAX_HISTORY_BLOCKS : 0n;
+  const floor = createdAt === null ? windowFloor : createdAt > historyFloor ? createdAt : historyFloor;
+  const scan = async (step: bigint): Promise<SimpleLog[]> => {
+    const out: SimpleLog[] = [];
+    for (let to = head; to >= floor; to -= step + 1n) {
+      const from = to - step > floor ? to - step : floor;
+      const logs: RpcLog[] = await c.request({
+        method: "eth_getLogs",
+        params: [{ address, fromBlock: `0x${from.toString(16)}`, toBlock: `0x${to.toString(16)}`, ...(topics ? { topics } : {}) }],
+      });
+      for (const l of logs) {
+        if (l.blockNumber === null || l.transactionHash === null) continue;
+        out.push({ data: l.data, topics: l.topics as SimpleLog["topics"], blockNumber: BigInt(l.blockNumber), transactionHash: l.transactionHash });
+      }
+      if (from === floor) break;
     }
-    if (from === floor) break;
+    return out;
+  };
+  let step = head - floor;
+  for (;;) {
+    try {
+      const out = await scan(step);
+      return out.sort((a, b) => (a.blockNumber < b.blockNumber ? -1 : a.blockNumber > b.blockNumber ? 1 : 0));
+    } catch (e) {
+      const next = smallerStep(e, step);
+      if (next === null) throw e;
+      step = next;
+    }
   }
-  return out.sort((a, b) => (a.blockNumber < b.blockNumber ? -1 : a.blockNumber > b.blockNumber ? 1 : 0));
+}
+
+/** Creation block of a contract from the explorer's creation tx, confirmed by its onchain receipt. */
+async function creationBlock(c: PublicClient, meta: ContractMeta | null): Promise<bigint | null> {
+  if (!meta?.creationTx) return null;
+  const receipt = await c.getTransactionReceipt({ hash: meta.creationTx }).catch(() => null);
+  return receipt?.blockNumber ?? null;
 }
 
 const KNOWN_EVENT_ABI: Abi = [...bridgeAbi, ...ccipAbi, ...erc20Abi, ...roleAbi];
@@ -215,7 +257,10 @@ async function getContract(env: CopilotEnv, chain: ChainKey, address: Address): 
 
 async function listRoleGrants(env: CopilotEnv, chain: ChainKey, token: Address): Promise<ToolOutcome> {
   const c = client(env, chain);
-  const logs = await chunkedLogs(c, token, env.logLookback);
+  // Grants happen at deployment, usually far outside the recent window: scan from the token's creation,
+  // filtered to access-control events so a busy token's Transfers do not flood the scan.
+  const tokenMeta = await env.explorer.contract(chain, token).catch(() => null);
+  const logs = await chunkedLogs(c, token, env.logLookback, [ROLE_TOPICS], await creationBlock(c, tokenMeta));
   const grants: { event: string; role: string | null; account: string; block: string; tx: string }[] = [];
   for (const log of logs) {
     try {
@@ -253,14 +298,95 @@ async function listRoleGrants(env: CopilotEnv, chain: ChainKey, token: Address):
   };
 }
 
+/** CCIP TokenPool 2.0.0 remote configuration (docs/research/ccip.md); getRemotePool is the 1.5.0 fallback. */
+const poolAbi = parseAbi([
+  "function getToken() view returns (address)",
+  "function getSupportedChains() view returns (uint64[])",
+  "function getRemotePools(uint64 remoteChainSelector) view returns (bytes[])",
+  "function getRemotePool(uint64 remoteChainSelector) view returns (bytes)",
+  "function getRemoteToken(uint64 remoteChainSelector) view returns (bytes)",
+  "function getLockBox() view returns (address)",
+]);
+
+/** An abi-encoded EVM address (32 bytes, left-padded) or a raw 20-byte one; anything else is a non-EVM remote. */
+export function evmAddressFromBytes(b: Hex): Address | null {
+  const hex = b.slice(2);
+  if (hex.length === 40) return `0x${hex}`.toLowerCase() as Address;
+  if (hex.length === 64 && /^0{24}/.test(hex)) return `0x${hex.slice(24)}`.toLowerCase() as Address;
+  return null;
+}
+
+type RemoteLane = {
+  chainSelector: string;
+  chain: ChainKey | null;
+  remoteToken: Address | null;
+  remotePools: Address[];
+  onRamp: Address | null;
+  offRamp: Address | null;
+  remoteTokenMeta: { symbol: string | null; decimals: number | null } | null;
+  /** What the remote side says about itself, read on the remote chain. */
+  remoteCheck: { registryPool: Address | null; poolToken: Address | null; poolPointsBack: boolean | null; consistent: boolean } | null;
+};
+
+const lower = (v: unknown): Address | null => (typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v) ? (v.toLowerCase() as Address) : null);
+
+async function registeredPool(env: CopilotEnv, c: PublicClient, chain: ChainKey, token: Address): Promise<Address | null> {
+  const registry = env.tokenAdminRegistry[chain];
+  if (!registry) return null;
+  const p = await c.readContract({ address: registry, abi: tokenAdminRegistryAbi, functionName: "getPool", args: [token] });
+  return BigInt(p) === 0n ? null : (p.toLowerCase() as Address);
+}
+
+async function remoteLane(env: CopilotEnv, c: PublicClient, pool: Address, localChain: ChainKey, token: Address, selector: bigint): Promise<RemoteLane> {
+  const remoteChain = chainBySelector(selector)?.key ?? null;
+  const tokenBytes = await c.readContract({ address: pool, abi: poolAbi, functionName: "getRemoteToken", args: [selector] }).catch(() => null);
+  let poolBytes: readonly Hex[] = await c.readContract({ address: pool, abi: poolAbi, functionName: "getRemotePools", args: [selector] }).catch(() => []);
+  if (poolBytes.length === 0) {
+    const single = await c.readContract({ address: pool, abi: poolAbi, functionName: "getRemotePool", args: [selector] }).catch(() => null);
+    if (single) poolBytes = [single];
+  }
+  const remoteToken = tokenBytes ? evmAddressFromBytes(tokenBytes) : null;
+  const remotePools = poolBytes.map(evmAddressFromBytes).filter((x): x is Address => x !== null);
+  const ramps = remoteChain ? (env.ramps[remoteChain] ?? null) : null;
+  const lane: RemoteLane = {
+    chainSelector: selector.toString(),
+    chain: remoteChain,
+    remoteToken,
+    remotePools,
+    onRamp: lower(ramps?.onRamp),
+    offRamp: lower(ramps?.offRamp),
+    remoteTokenMeta: null,
+    remoteCheck: null,
+  };
+  const rc = remoteChain ? env.clients[remoteChain] : undefined;
+  if (!rc || !remoteChain || !remoteToken) return lane;
+  // Cross-check on the remote chain: the lane is only trustworthy when both ends agree.
+  const [symbol, decimals, registryPool] = await Promise.all([
+    rc.readContract({ address: remoteToken, abi: erc20Abi, functionName: "symbol" }).catch(() => null),
+    rc.readContract({ address: remoteToken, abi: erc20Abi, functionName: "decimals" }).catch(() => null),
+    registeredPool(env, rc, remoteChain, remoteToken).catch(() => null),
+  ]);
+  lane.remoteTokenMeta = { symbol, decimals };
+  const remotePool = registryPool ?? remotePools[0] ?? null;
+  const poolToken = remotePool ? lower(await rc.readContract({ address: remotePool, abi: poolAbi, functionName: "getToken" }).catch(() => null)) : null;
+  const back = remotePool ? await rc.readContract({ address: remotePool, abi: poolAbi, functionName: "getRemoteToken", args: [CHAINS[localChain].selector] }).catch(() => null) : null;
+  const poolPointsBack = back === null ? null : evmAddressFromBytes(back) === token;
+  lane.remoteCheck = {
+    registryPool,
+    poolToken,
+    poolPointsBack,
+    consistent: poolToken === remoteToken && poolPointsBack === true && (registryPool === null || remotePools.includes(registryPool)),
+  };
+  return lane;
+}
+
 async function listCcipPools(env: CopilotEnv, chain: ChainKey, token: Address): Promise<ToolOutcome> {
   const c = client(env, chain);
-  const registry = env.tokenAdminRegistry[chain];
   let pool: Address | null = null;
   let via = "TokenAdminRegistry";
+  const registry = env.tokenAdminRegistry[chain] ?? null;
   if (registry) {
-    const p = await c.readContract({ address: registry, abi: tokenAdminRegistryAbi, functionName: "getPool", args: [token] });
-    pool = BigInt(p) === 0n ? null : (p.toLowerCase() as Address);
+    pool = await registeredPool(env, c, chain, token);
   } else {
     // No registry on this chain (local Anvil): find pools among the token deployer's contracts whose getToken() is the token.
     via = "deployer contracts (no TokenAdminRegistry on this chain)";
@@ -274,19 +400,30 @@ async function listCcipPools(env: CopilotEnv, chain: ChainKey, token: Address): 
       }
     }
   }
-  const tv = pool ? await c.readContract({ address: pool, abi: typeAndVersionAbi, functionName: "typeAndVersion" }).catch(() => null) : null;
   const ramps = env.ramps[chain] ?? null;
+  const base = { chain, token, registry, lookup: via, onRamp: lower(ramps?.onRamp), offRamp: lower(ramps?.offRamp) };
+  if (!pool) {
+    return { ok: true, result: { ...base, pool: null, remotes: [] }, summary: `no CCIP pool registered for this token on ${CHAINS[chain].label}`, href: null };
+  }
+  const [tv, lockBox, selectors] = await Promise.all([
+    c.readContract({ address: pool, abi: typeAndVersionAbi, functionName: "typeAndVersion" }).catch(() => null),
+    c.readContract({ address: pool, abi: poolAbi, functionName: "getLockBox" }).catch(() => null),
+    c.readContract({ address: pool, abi: poolAbi, functionName: "getSupportedChains" }).catch(() => [] as readonly bigint[]),
+  ]);
+  const remotes = await Promise.all(selectors.map((sel) => remoteLane(env, c, pool, chain, token, sel)));
+  const known = remotes.filter((r) => r.chain !== null);
   return {
     ok: true,
-    result: { chain, token, pool, poolTypeAndVersion: tv, lookup: via, onRamp: ramps?.onRamp ?? null, offRamp: ramps?.offRamp ?? null },
-    summary: pool ? `CCIP pool ${pool} on ${CHAINS[chain].label}` : `no CCIP pool registered on ${CHAINS[chain].label}`,
-    href: pool ? link(env, "address", chain, pool) : null,
+    result: { ...base, pool, poolTypeAndVersion: tv, lockBox: lower(lockBox), remotes },
+    summary: `CCIP pool ${pool} on ${CHAINS[chain].label}; ${remotes.length} remote lane${remotes.length === 1 ? "" : "s"}${known.length > 0 ? ` (${known.map((r) => (r.chain ? CHAINS[r.chain].label : r.chainSelector)).join(", ")})` : ""}`,
+    href: link(env, "address", chain, pool),
   };
 }
 
 async function listOftPeers(env: CopilotEnv, chain: ChainKey, oft: Address): Promise<ToolOutcome> {
   const c = client(env, chain);
-  const logs = await chunkedLogs(c, oft, env.logLookback, [toEventSelector("PeerSet(uint32,bytes32)")]);
+  const meta = await env.explorer.contract(chain, oft).catch(() => null);
+  const logs = await chunkedLogs(c, oft, env.logLookback, [toEventSelector("PeerSet(uint32,bytes32)")], await creationBlock(c, meta));
   const peers = new Map<number, string>();
   for (const log of logs) {
     try {

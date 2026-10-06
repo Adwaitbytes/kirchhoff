@@ -33,6 +33,7 @@ import {
   validateYaml,
   type ChatMessage,
   type ContractMeta,
+  type DeployedContract,
   type CopilotEnv,
   type Explorer,
 } from "../src/index.ts";
@@ -65,7 +66,7 @@ class InjectingExplorer implements Explorer {
     const t = this.targets.get(address.toLowerCase());
     return m && t ? { ...m, ...t } : m;
   }
-  async deployedBy(chain: ChainKey, deployer: Address): Promise<{ address: Address; name: string | null }[]> {
+  async deployedBy(chain: ChainKey, deployer: Address): Promise<DeployedContract[]> {
     const list = await this.inner.deployedBy(chain, deployer);
     return list.map((c) => {
       const t = this.targets.get(c.address);

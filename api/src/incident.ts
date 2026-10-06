@@ -245,10 +245,17 @@ export class IncidentBuilder {
         messageId: v.messageId,
       });
     }
-    const lab = (await this.db.query<{ run: { steps?: { key: string; txs?: TxRef[]; note?: string | null }[] } }>("select run from lab_runs where run->>'incidentId' = $1 order by started_at desc limit 1", [row.id])).rows[0];
+    const lab = (
+      await this.db.query<{ run: { steps?: { key: string; txs?: TxRef[]; note?: string | null }[]; console?: { text: string; tx: TxRef | null }[] } }>(
+        "select run from lab_runs where run->>'incidentId' = $1 order by started_at desc limit 1",
+        [row.id],
+      )
+    ).rows[0];
     const guardStep = lab?.run.steps?.find((s) => s.key === "guard_and_lending");
     for (const tx of guardStep?.txs ?? []) {
-      add({ kind: "guard_revert", chain: tx.chain, at: tx.timestamp, label: guardStep?.note ?? `Guarded transfer reverted on ${CHAINS[tx.chain].label}`, tx, blocks: null, messageId: null });
+      // The step holds the Guard and the borrow refusal under one note; each tx's own console line names its revert.
+      const line = lab?.run.console?.find((l) => l.tx?.hash === tx.hash)?.text.replace(/^\[[\w-]+\] \w+: /, "");
+      add({ kind: "guard_revert", chain: tx.chain, at: tx.timestamp, label: line ?? guardStep?.note ?? `Guarded transfer reverted on ${CHAINS[tx.chain].label}`, tx, blocks: null, messageId: null });
     }
     const confirm = await this.db.query<{ chain: ChainKey; tx_hash: Hex; block: string; block_time: Date; delta: string | null }>(
       "select chain, tx_hash, block, block_time, delta::text from breaches where token_symbol = $1 and reason = 'LOOP_DEFICIT' and incident_id <> $2 and block_time >= $3 and chain = $4 order by block_time limit 1",

@@ -136,7 +136,8 @@ export function renderDraft(d: DraftStructure, check: ProvenanceChecker): { yaml
   line(`  canonical: ${q(d.home.canonical.value)}`, check(d.home.canonical));
   if (d.home.escrow) line(`  escrow: ${q(d.home.escrow.value)}`, check(d.home.escrow));
   line(`  decimals: ${d.home.decimals.value}`, check(d.home.decimals));
-  line("remotes:");
+  // An empty section must render as [] or YAML reads it as null ("must be array").
+  line(d.remotes.length === 0 ? "remotes: []" : "remotes:");
   for (const r of d.remotes) {
     line(`  - chain: ${r.chain.value}`, isChainKey(r.chain.value) ? check(r.chain) : null);
     line(`    alias: ${aliasOf(r.chain.value)}`);
@@ -146,7 +147,7 @@ export function renderDraft(d: DraftStructure, check: ProvenanceChecker): { yaml
     if (r.decimals) line(`    decimals: ${r.decimals.value}`, check(r.decimals));
     else line("    decimals: 18");
   }
-  line("bridges:");
+  line(d.bridges.length === 0 ? "bridges: []" : "bridges:");
   for (const b of d.bridges) {
     line(`  - id: ${b.id}`);
     line(`    kind: ${b.kind}`);
