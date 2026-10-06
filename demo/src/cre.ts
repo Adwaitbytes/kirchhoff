@@ -104,6 +104,16 @@ export class SimulationError extends Error {
  * Reruns are safe: epoch ids only increase, a repeated BREACH is a no-op per incident, W3 skips contained ledgers.
  * Throws unless the run printed a result and no error.
  */
+/** Refreshes the CRE CLI session (the access token expires during long testnet runs). */
+async function refreshCreSession(): Promise<void> {
+  try {
+    await promisify(execFile)("cre", ["whoami"], { cwd: WORKFLOWS_DIR, env: { ...process.env, ...env() }, timeout: 60_000 });
+    log("  [cre] session refreshed");
+  } catch (e) {
+    log(`  [cre] session refresh failed: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);
+  }
+}
+
 export async function simulate(
   net: NetworkName,
   workflow: Workflow,
@@ -122,6 +132,8 @@ export async function simulate(
     const limited = RATE_LIMITED.test(result.output);
     if (!limited && !TRANSIENT.test(result.output)) break;
     if (limited) rotation++;
+    // An expired CRE session fails every retry the same way; `cre whoami` exchanges the refresh token first.
+    if (result.output.includes("Credential validation failed")) await refreshCreSession();
     log(`  [${workflow}] ${limited ? `RPC rate limited, rotating providers (set ${rotation})` : "CRE login transient"}; retry ${attempt + 1}/7 in ${10 * attempt}s`);
     await new Promise((r) => setTimeout(r, 10_000 * attempt));
     result = await simulateOnce({ ...args, wasm: await wasmFor(workflow, target) }, rotation);
