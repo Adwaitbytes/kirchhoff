@@ -2,7 +2,7 @@ import { Reason, Status } from "@kirchhoff/engine";
 import { encodeAbiParameters, keccak256, pad, parseEventLogs, toHex, zeroAddress, zeroHash, type Address, type Hex, type TransactionReceipt } from "viem";
 import { kethAbi, ledgerAbi, lendingAbi, localRouterAbi, erc20Abi, poolAbi, routerAbi, weakBridgeAbi } from "./abi.ts";
 import { approveToken } from "./bridge.ts";
-import { account, expectRevert, read, send, TxError, type Refusal, type Sent } from "./chain.ts";
+import { account, expectRevert, fundIfBelow, read, send, TxError, type Refusal, type Sent } from "./chain.ts";
 import { tokenOf, type Context } from "./context.ts";
 import { txUrl } from "./networks.ts";
 import { signCredit } from "./bridge.ts";
@@ -224,9 +224,15 @@ export async function attemptRefusals(ctx: Context, emit: Emit, broadcast: boole
     ccip = await expectRevert(home, deployer, { to: pool, abi: poolAbi, functionName: "lockOrBurn", args: [lockOrBurnIn] }, "KirchhoffTokenPool.lockOrBurn for the attacker (OnRamp stand-in)", broadcast, 500_000n);
     emit({ step: "refuse-ccip", status: "refused", chain: "home", title: "CCIP lockOrBurn reverted inside KirchhoffTokenPool", revertReason: ccip.reason, txHash: ccip.hash, explorerUrl: ccip.url });
   } else {
-    await approveToken(ctx, "home", attacker, router, CCIP_PROBE_AMOUNT);
     const message = ccipMessage(keth, attacker.address, CCIP_PROBE_AMOUNT);
     const fee = await nativeFee(ctx, router, message);
+    // The attempt must be mined to leave explorer evidence, so the attacker needs the native fee plus gas for the
+    // approve, the reverted ccipSend and the later Guard and borrow attempts (50% headroom on the live gas price).
+    const gasPrice = await home.client.getGasPrice();
+    const needed = fee + ((gasPrice * 3n) / 2n) * (600_000n + 3n * 150_000n);
+    const topped = await fundIfBelow(home, attacker.address, needed, needed + needed / 5n, "attacker for the CCIP attempt");
+    if (topped !== null) emit({ step: "fund", status: "ok", chain: "home", title: "attacker funded for the CCIP attempt", txHash: topped.hash, explorerUrl: topped.url });
+    await approveToken(ctx, "home", attacker, router, CCIP_PROBE_AMOUNT);
     ccip = await expectRevert(home, attacker, { to: router, abi: routerAbi, functionName: "ccipSend", args: [ctx.net.chains.base.selector, message], value: fee }, "attacker Router.ccipSend kETH -> Base", true, 600_000n);
     emit({ step: "refuse-ccip", status: "refused", chain: "home", title: "attacker ccipSend reverted onchain (Router pulls tokens first: KirchhoffGuard)", revertReason: ccip.reason, txHash: ccip.hash, explorerUrl: ccip.url, detail: { nativeFee: fee.toString() } });
 
