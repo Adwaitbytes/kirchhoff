@@ -108,6 +108,23 @@ into one Multicall3 call per chain and provider (this build) cut the Anvil-run p
 timeouts) to 486 ms. What the Anvil runs do show: zero wrong verdicts and zero errors, with every slow answer still a
 correct PASS inside the 2 s budget.
 
+## Run D: real contracts on Anvil, two independent providers, quiet machine (2026-10-06)
+
+Same Judge build and harness as run C (provider 1 = origin Anvil node per chain, provider 2 = a separate
+`anvil --fork-url` process), HMAC-signed requests, 100 rps for 60 s, measured with the machine at a 1-minute load
+average of about 4 (runs B and C ran at 15 to 54 alongside Playwright suites and a k3d cluster).
+
+| Metric | Value |
+| --- | --- |
+| Requests | 6001 at 100.0 rps, 0 dropped iterations |
+| Failed requests | 0 of 6001 |
+| Checks | 12002 of 12002 succeeded (every answer a correct PASS) |
+| http_req_duration | min 1.07 ms, p50 4.26 ms, p90 5.37 ms, p95 5.96 ms, **p99 9.31 ms**, max 22.79 ms |
+| Threshold `p(99)<300` | passed |
+
+This is the measurement to quote for the PRD target (p99 under 300 ms at 100 rps): the earlier Anvil misses were
+caused by machine contention, not by the Judge.
+
 ## Against real testnet RPCs (not a load test)
 
 The live Sepolia check in `test/replay.test.ts` (`JUDGE_LIVE=1`) ran the debit lookup through both keyless
