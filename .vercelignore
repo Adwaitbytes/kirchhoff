@@ -32,9 +32,9 @@
 !/mcp/package.json
 /demo/**
 !/demo/package.json
-/web/.next
-/web/.next-e2e
+/web/.next*
 /web/node_modules
 /web/test-results
 /web/playwright-report
 /web/e2e/__screenshots__
+/web/tsconfig.tsbuildinfo
