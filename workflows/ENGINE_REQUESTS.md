@@ -70,7 +70,7 @@ R1 (resolved spec in W1/W2 configs + `reviveSpec`), R3 (supply trigger topic fil
 W2 debit watches) were delivered by the engine; the workflows now use them directly (`reviveSpec(config.spec)`,
 `config.supplyTriggers`, `debitEvents[].registry`) and the interim fallbacks were removed. All requests are closed.
 
-## R8. W4 needs the spec, the CCIP TokenAdminRegistry and the notify secrets (OPEN, 2026-10-06)
+## R8. W4 needs the spec, the CCIP TokenAdminRegistry and the notify secrets (RESOLVED, 2026-10-06)
 
 PRD_TRACEABILITY 8.W4.1-8.W4.3: W4 must (a) compare `KirchhoffRegistry.activeSpec(tokenId).specHash` with the spec it
 runs, (b) check the token's CCIP pool and pool peers against the spec, and (c) page the issuer when it raises DRIFT.
@@ -81,3 +81,13 @@ Ask, all additive to `W4Config`:
 - `notifySecrets: string[]` exactly as in `W3Config` (from `response.on_broken` containing `page_issuer`).
 `workflows/scripts/lib/deployments.ts` will fill `ccip.tokenAdminRegistry` from the Deploy.s.sol record
 (`ccipTokenAdminRegistry`, zero address -> omitted).
+
+**RESOLVED (engine, 2026-10-06).** All additive:
+- `W4Config.spec: SpecJson`: the same resolved spec as W1/W2; revive with `reviveSpec`.
+- `W4Config.chains[].tokenAdminRegistry: Hex | null`: from the new optional `ChainDeployment.ccip.tokenAdminRegistry`
+  (the deployments schema accepts it under `chains.<name>.ccip`); `null` when absent.
+- `W4Config.chains[].ccipPools: Hex[]`: the spec's CCIP pool on that chain for each `ccip_v2` bridge, so W4 does
+  not have to walk the spec for the common case.
+- `W4Config.notifySecrets: string[]`: identical to `W3Config.notifySecrets` (the three `NOTIFY_*` ids when
+  `on_broken` contains `page_issuer`, else `[]`).
+Goldens in engine/test/golden/w4-topology/ are updated.

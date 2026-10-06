@@ -381,7 +381,7 @@ describe("W4 Topology Watch", () => {
   /** kETH's W4 config with the public testnet chain ids, so the CCIP TokenAdminRegistry checks apply. */
   const onTestnets = (): Configs["w4"] => ({
     ...c.w4,
-    chains: c.w4.chains.map((ch) => ({ ...ch, chainId: ({ [HOME]: 11155111, [ARB]: 421614, [BASE]: 84532 } as Record<string, number>)[ch.name] ?? ch.chainId })),
+    chains: c.w4.chains.map((ch) => ({ ...ch, tokenAdminRegistry: REGISTRY[ch.name] ?? null })),
   });
   const REGISTRY: Record<string, Hex> = {
     [HOME]: "0x95F29FEE11c5C55d26cCcf1DB6772DE953B37B82",
@@ -405,7 +405,8 @@ describe("W4 Topology Watch", () => {
         ? encodeFunctionResult({ abi: ACCESS_CONTROL_ABI, functionName: "hasRole", result: w.hasRole ?? true })
         : undefined,
     );
-    const pools: Partial<Record<string, Hex>> = w.pools ?? {};
+    // Without a TokenAdminRegistry W4 checks the spec pools' peers, so the fake serves those pools by default.
+    const pools: Partial<Record<string, Hex>> = w.pools ?? { [HOME]: ADDR.home.pool, [ARB]: ADDR.arb.pool, [BASE]: ADDR.base.pool };
     for (const chain of [HOME, ARB, BASE]) {
       fake.on(chain, (to, data) => {
         if (to.toLowerCase() === REGISTRY[chain]?.toLowerCase()) {
@@ -443,7 +444,8 @@ describe("W4 Topology Watch", () => {
     expect(r?.reportType === ReportType.EPOCH && r.payload.epochId).toBe(2_000n);
     expect(out.text).toContain(ATTACKER);
     expect(out.driftKey).toBe(driftKey(c.w4.tokenId, out.findings));
-    expect(budget.used).toBe(3);
+    // 3 state + 3 pool-peer aggregate3 (the spec pools, no TokenAdminRegistry on Anvil-style configs)
+    expect(budget.used).toBe(6);
   });
 
   it("ignores a grant to a spec minter and a grant that was already revoked", () => {
@@ -467,7 +469,7 @@ describe("W4 Topology Watch", () => {
     const budget = new ReadBudget();
     const out = runTopology(withBudget(fake, budget), c.w4, MULTICALL3, { kind: "scan" }, 2_000n);
     expect(out.findings).toHaveLength(1);
-    expect(budget.used).toBe(2 + 2 * 3 + 3);
+    expect(budget.used).toBe(2 + 2 * 3 + 3 + 3);
   });
 
   it("checks the CCIP pool and its peers from current state; all consistent is clean at 14 reads", () => {

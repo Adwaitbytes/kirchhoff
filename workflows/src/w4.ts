@@ -11,22 +11,10 @@ type TopologyChain = W4Config["chains"][number];
 
 /**
  * 100-block RoleGranted windows scanned per remote chain on the cron / SpecActivated path. Budget with two remotes
- * and three chains: 2 latest headers + 2 x 3 filterLogs + 3 state Multicall3 + up to 3 pool-peer Multicall3 = 14
- * of 15. Grants older than the windows are caught by the per-chain RoleGranted triggers when they happen, and
+ * and three chains: 2 latest headers + 2 x 3 filterLogs + 3 state Multicall3 + 3 pool-peer Multicall3 = 14 of 15. Grants older than the windows are caught by the per-chain RoleGranted triggers when they happen, and
  * pool / peer drift is read from current state, so it has no window at all.
  */
 export const W4_WINDOWS_PER_CHAIN = 3;
-
-/**
- * CCIP TokenAdminRegistry 1.5.0 per public testnet chain id (docs/research/ccip.md section 1, checked live with
- * typeAndVersion). The compiled W4 config does not carry it yet (ENGINE_REQUESTS.md R8); Anvil has none, so the
- * pool checks there start from the spec pools instead.
- */
-export const TOKEN_ADMIN_REGISTRIES: Readonly<Record<number, Hex>> = {
-  11155111: "0x95F29FEE11c5C55d26cCcf1DB6772DE953B37B82",
-  421614: "0x8126bE56454B628a88C17849B9ED99dd5a11Bd2f",
-  84532: "0x736D0bBb318c1B27Ff686cd19804094E66250e17",
-};
 
 export const TOPOLOGY_ABI = parseAbi([
   "function getPool(address token) view returns (address)",
@@ -46,15 +34,12 @@ export function watchedChains(config: W4Config): TopologyChain[] {
 
 /** Chains with a CCIP TokenAdminRegistry, in config order: the `PoolSet` triggers. */
 export function poolSetChains(config: W4Config): (TopologyChain & { tokenAdminRegistry: Hex })[] {
-  return config.chains.flatMap((c) => {
-    const registry = TOKEN_ADMIN_REGISTRIES[c.chainId];
-    return registry === undefined ? [] : [{ ...c, tokenAdminRegistry: registry }];
-  });
+  return config.chains.flatMap((c) => (c.tokenAdminRegistry === null ? [] : [{ ...c, tokenAdminRegistry: c.tokenAdminRegistry }]));
 }
 
 export type Finding =
   | { kind: "minter"; chain: TopologyChain; account: Hex }
-  | { kind: "pool"; chain: TopologyChain; pool: Hex }
+  | { kind: "pool"; chain: TopologyChain; pool: Hex; expected: readonly Hex[] }
   | { kind: "peer"; chain: TopologyChain; detail: string }
   | { kind: "spec"; active: Hex; running: Hex };
 
@@ -63,7 +48,7 @@ export function describe(f: Finding): string {
     case "minter":
       return `${f.chain.name}: ${f.account} holds MINTER_ROLE but is not a spec minter`;
     case "pool":
-      return `${f.chain.name}: CCIP TokenAdminRegistry pool ${f.pool} is not a spec pool`;
+      return `${f.chain.name}: CCIP TokenAdminRegistry pool ${f.pool} is not the spec pool (${f.expected.join(", ") || "none"})`;
     case "peer":
       return `${f.chain.name}: ${f.detail}`;
     case "spec":
@@ -96,7 +81,11 @@ export function unlisted(chain: TopologyChain, accounts: readonly Hex[]): Hex[] 
 
 type LedgerView = { status: number; delta: bigint; latestEpochId: bigint };
 
-type ChainState = { chain: TopologyChain; ledger: LedgerView; minters: Hex[]; pool: Hex | null; activeSpecHash: Hex | null };
+/**
+ * `pool` is the pool the chain actually routes CCIP through: the TokenAdminRegistry's answer where a registry is
+ * deployed, else the spec pool (Anvil), so peer checks run everywhere. `registered` says which one it is.
+ */
+type ChainState = { chain: TopologyChain; ledger: LedgerView; minters: Hex[]; pool: Hex | null; registered: boolean; activeSpecHash: Hex | null };
 
 type Read = { call: Call; use: (r: CallResult) => void };
 
@@ -106,7 +95,15 @@ type Read = { call: Call; use: (r: CallResult) => void };
  * registry chain the active spec hash (PRD section 6 spec lifecycle: the workflows must run the activated spec).
  */
 function readState(io: ChainIo, config: W4Config, multicall3: Hex, chain: TopologyChain, candidates: readonly Hex[]): ChainState {
-  const state: ChainState = { chain, ledger: { status: 0, delta: 0n, latestEpochId: 0n }, minters: [], pool: null, activeSpecHash: null };
+  const specPool = chain.ccipPools[0];
+  const state: ChainState = {
+    chain,
+    ledger: { status: 0, delta: 0n, latestEpochId: 0n },
+    minters: [],
+    pool: specPool === undefined ? null : (specPool.toLowerCase() as Hex),
+    registered: false,
+    activeSpecHash: null,
+  };
   const reads: Read[] = [
     {
       call: { target: chain.ledger, callData: encodeFunctionData({ abi: LEDGER_ABI, functionName: "statusOf", args: [config.tokenId] }) },
@@ -129,13 +126,14 @@ function readState(io: ChainIo, config: W4Config, multicall3: Hex, chain: Topolo
       },
     })),
   ];
-  const tokenAdminRegistry = TOKEN_ADMIN_REGISTRIES[chain.chainId];
-  if (tokenAdminRegistry !== undefined) {
+  const tokenAdminRegistry = chain.tokenAdminRegistry;
+  if (tokenAdminRegistry !== null) {
     reads.push({
       call: { target: tokenAdminRegistry, callData: encodeFunctionData({ abi: TOPOLOGY_ABI, functionName: "getPool", args: [chain.token] }) },
       use: (r) => {
         const pool = decodeFunctionResult({ abi: TOPOLOGY_ABI, functionName: "getPool", data: successful(r, `${chain.name} getPool`) });
         state.pool = pool.toLowerCase() === ZERO_ADDRESS ? null : (pool.toLowerCase() as Hex);
+        state.registered = true;
       },
     });
   }
@@ -161,20 +159,20 @@ function decodeRemotePool(raw: Hex): Hex | null {
 
 /**
  * Pool checks from current state, so a pool swap or a peer added long ago is seen by every run:
- * - on a remote, the registered CCIP pool must be a spec minter of that chain;
+ * - the pool registered in the CCIP TokenAdminRegistry must be one of the spec's pools on that chain;
  * - round 2 (one aggregate3 per chain with a known pool): its supported chains must all be spec chains, and for
  *   every other spec chain whose pool is known, its remote pools must be exactly that pool (the peer set).
- * Chains with no TokenAdminRegistry (Anvil) or no registered pool are skipped and logged.
+ * Without a TokenAdminRegistry (Anvil) the spec pool's peers are still checked; a chain with no pool is skipped.
  */
 function checkPools(io: ChainIo, config: W4Config, multicall3: Hex, states: readonly ChainState[]): Finding[] {
   const findings: Finding[] = [];
   const specSelectors = new Set(config.chains.map((c) => c.selector));
   for (const s of states) {
     if (s.pool === null) {
-      io.log(`${s.chain.name}: no CCIP TokenAdminRegistry pool to check`);
+      io.log(`${s.chain.name}: no CCIP pool to check`);
       continue;
     }
-    if (!s.chain.isHome && !s.chain.expectedMinters.some((m) => sameAddress(m, s.pool ?? ZERO_ADDRESS))) findings.push({ kind: "pool", chain: s.chain, pool: s.pool });
+    if (s.registered && !s.chain.ccipPools.some((p) => sameAddress(p, s.pool ?? ZERO_ADDRESS))) findings.push({ kind: "pool", chain: s.chain, pool: s.pool, expected: s.chain.ccipPools });
     const peers = states.filter((o) => o !== s && o.pool !== null);
     const reads: Read[] = [
       {

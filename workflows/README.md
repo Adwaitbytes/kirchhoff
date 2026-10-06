@@ -59,6 +59,30 @@ cre workflow simulate ./w2-loop --target staging --non-interactive --trigger-ind
 RPCs). Simulation is single node and needs `cre login`; deploy access is not enabled for this org, so nothing here
 is deployed.
 
+## Testnet simulation runner standing in for the CRE DON cron while deploy access is pending
+
+CRE deploy access is not enabled for this org, so no DON runs W2's 30 s cron on the testnets and the ledgers go
+stale (`stalenessSeconds` 120) two minutes after each epoch. `scripts/runner.ts` stands in for the DON:
+
+```bash
+pnpm --filter @kirchhoff/workflows runner --target staging --interval 90 --max-sepolia-eth 0.02 [--rounds N] [--max-sepolia-gwei 1.5]
+```
+
+Each round (every `--interval` seconds, minimum 30):
+1. stops if the deployer's Sepolia balance has dropped by more than `--max-sepolia-eth` since start (hard cap);
+2. skips the round if Sepolia gas is above `--max-sepolia-gwei` (default 1.5);
+3. runs W1 (`--broadcast`) for every new credit log on each chain, once the log is at the chain's trigger
+   confidence (what the deployed log trigger would fire on), then W3 for every new `BreachRecorded` (including
+   the breach W1 just wrote), then W2 on its cron trigger with `--broadcast`.
+
+Simulations use the prebuilt WASM. A provider 429 is retried with exponential backoff (2, 4, 8 s) and then the
+run moves to target `staging-fallback` (provider 2, `RPC_*_2`); the runner's own reads use a viem fallback
+transport over both providers. Every event is one JSON line on stdout and in `workflows/runner.log.jsonl`
+(`round_start`, `simulated`, `round_done` with report tx hashes and Sepolia spent, `rate_limited`,
+`provider_fallback`, `round_skipped_gas`, `spend_cap_reached`, `runner_stopped`). SIGINT / SIGTERM finish the
+current simulation and exit. Log cursors start at the confident head when the runner starts: it never replays
+history. The loop logic is unit-tested with a mock CLI (`test/runner.test.ts`).
+
 ## Config generation
 
 `gen-config` runs `compileSpecDocuments` from `@kirchhoff/engine/spec` over `engine/specs/kETH.yaml` and the
@@ -103,8 +127,8 @@ Every read goes through `ReadBudget`; a sixteenth read throws before it is made,
 | W1, CCIP credit | + 1 `getTransactionReceipt` for the credit, + OnRamp `filterLogs` and debit receipt | 9 |
 | W2 | 3 pin headers + 3 x 2 `filterLogs` windows ending at each pin + 3 Multicall3 at the pin (supply, ledger status/epoch/recovery, escrow + lockbox balances, consumed flags, `debitOf` for credits whose debit is older than the windows) | 12 observed, + up to 3 Multicall3 at latest for credits delivered before their debit reached the source pin = 15 |
 | W3 | 3 Multicall3 (status + active incident per ledger) | 3 |
-| W4, RoleGranted / PoolSet trigger | 3 Multicall3 (ledger state, hasRole, TokenAdminRegistry.getPool, active spec hash) + up to 3 pool-peer Multicall3 (getSupportedChains, getRemotePools) | 3 local, 6 testnet |
-| W4, cron / SpecActivated | 2 latest headers + 2 x 3 RoleGranted windows + 3 + up to 3 Multicall3 | 11 local, 14 testnet (observed) |
+| W4, RoleGranted / PoolSet trigger | 3 Multicall3 (ledger state, hasRole, TokenAdminRegistry.getPool, active spec hash) + 3 pool-peer Multicall3 (getSupportedChains, getRemotePools) | 6 |
+| W4, cron / SpecActivated | 2 latest headers + 2 x 3 RoleGranted windows + 3 + 3 Multicall3 | 14 (observed on testnet) |
 
 Other limits honored: `filterLogs` <= 100 blocks per query (`logWindow`), <= 5 addresses per log trigger and <= 10
 triggers per workflow (checked when wiring W1), cron >= 30 s, Multicall3 calldata <= 5 KB (checked in
@@ -151,8 +175,8 @@ triggers per workflow (checked when wiring W1), cron >= 30 s, Multicall3 calldat
   `latestRoundData` at the pinned home block and bounds I_net by the claims (the issuer mint/burn adapter is PRD v1),
   so it enforces the reserve bound (RESERVE_SHORTFALL) but not an issuance bound. kETH has no feed: the read is
   skipped and the 12-read budget is unchanged (unit-tested).
-- W4 reads the CCIP TokenAdminRegistry address from a chain-id table (docs/research/ccip.md) and the notify secret
-  ids from W3's set, because the compiled W4 config does not carry them yet (ENGINE_REQUESTS.md R8).
+- On Anvil there is no CCIP TokenAdminRegistry, so W4 checks the spec pool's peers but cannot check which pool
+  the registry routes through.
 - W4's `SPEC_MISMATCH` DRIFT is overwritten by W2's next CONSERVED epoch; W4 re-raises it on every grant and cron
   run that still sees the grant. With the generated kETH spec, Base lists only the CCIP pool as minter while
   Deploy.s.sol also grants the Base WeakBridge, so a cron scan that reaches that grant flags it (correctly, per spec).

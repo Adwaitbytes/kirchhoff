@@ -150,7 +150,9 @@ export const w4ConfigSchema = z.object({
   registry: z.object({ chain: z.string().min(1), address, specActivatedTopic0: bytes32 }),
   roleGrantedTopic0: bytes32,
   minterRole: bytes32,
-  chains: z.array(chainEntry.extend({ expectedMinters: z.array(address) })).min(1),
+  spec: specJson,
+  chains: z.array(chainEntry.extend({ expectedMinters: z.array(address), ccipPools: z.array(address), tokenAdminRegistry: address.nullable() })).min(1),
+  notifySecrets: z.array(z.string().min(1)),
 });
 
 export type W1ConfigInput = z.input<typeof w1ConfigSchema>;

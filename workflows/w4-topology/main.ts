@@ -19,7 +19,6 @@ import { w4ConfigSchema, type W4ConfigInput } from "../src/config.ts";
 import { creChainIo, fromCreLog } from "../src/cre-io.ts";
 import { page, readNotifySecrets } from "../src/cre-notify.ts";
 import { withBudget } from "../src/io.ts";
-import { NOTIFY_SECRET_IDS } from "../src/notify.ts";
 import { poolSetChains, runTopology, TOPOLOGY_ABI, watchedChains, type TopologyTrigger } from "../src/w4.ts";
 
 const POOL_SET = encodeEventTopics({ abi: TOPOLOGY_ABI, eventName: "PoolSet" })[0];
@@ -32,8 +31,7 @@ const run = (runtime: Runtime<W4Config>, trigger: TopologyTrigger): string => {
   runtime.log(`W4 reads used ${budget.used}/15: ${budget.describe()}`);
   let sent = 0;
   if (outcome.text !== null && outcome.driftKey !== null) {
-    // W4's config carries no notifySecrets yet (ENGINE_REQUESTS.md R8): the issuer pager uses W3's secret ids.
-    sent = page(runtime, outcome.text, outcome.driftKey, readNotifySecrets(runtime, Object.values(NOTIFY_SECRET_IDS)));
+    sent = page(runtime, outcome.text, outcome.driftKey, readNotifySecrets(runtime, config.notifySecrets));
   }
   return `findings=${outcome.findings.length} writes=${outcome.writes.length} notified=${sent}`;
 };

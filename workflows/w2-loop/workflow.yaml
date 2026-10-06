@@ -22,3 +22,11 @@ staging:
     workflow-path: "./main.ts"
     config-path: "./config.staging.json"
     secrets-path: ""
+
+staging-fallback:
+  user-workflow:
+    workflow-name: "kirchhoff-w2-loop"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./config.staging.json"
+    secrets-path: ""

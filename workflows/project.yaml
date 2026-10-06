@@ -37,3 +37,16 @@ staging:
       url: ${RPC_ARB_SEPOLIA_1}
     - chain-name: ethereum-testnet-sepolia-base-1
       url: ${RPC_BASE_SEPOLIA_1}
+
+# staging-fallback: the same public testnets with Sepolia and Base on provider 2 (RPC_*_2). scripts/runner.ts
+# switches to it when provider 1 keeps answering 429. Arbitrum Sepolia stays on provider 1: W2 reads at the
+# finalized pin, ~4,000 Arbitrum blocks back, and publicnode answers "historical state ... is not available" there
+# (checked 2026-10-06; it serves Sepolia's 76-block and Base's 540-block finalized lag). Configs are the staging ones.
+staging-fallback:
+  rpcs:
+    - chain-name: ethereum-testnet-sepolia
+      url: ${RPC_ETH_SEPOLIA_2}
+    - chain-name: ethereum-testnet-sepolia-arbitrum-1
+      url: ${RPC_ARB_SEPOLIA_1}
+    - chain-name: ethereum-testnet-sepolia-base-1
+      url: ${RPC_BASE_SEPOLIA_2}

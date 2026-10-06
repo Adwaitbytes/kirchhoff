@@ -22,3 +22,11 @@ staging:
     workflow-path: "./main.ts"
     config-path: "./config.staging.json"
     secrets-path: "../secrets.yaml"
+
+staging-fallback:
+  user-workflow:
+    workflow-name: "kirchhoff-w4-topology"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./config.staging.json"
+    secrets-path: "../secrets.yaml"

@@ -10,6 +10,8 @@ export type DeployRecord = {
   quarantineController: Hex;
   conservationFeed: Hex;
   ccipRouter: Hex;
+  /** Zero on Anvil (Deploy.s.sol has no TokenAdminRegistry there). */
+  ccipTokenAdminRegistry?: Hex;
   kirchhoffTokenPool: Hex;
   weakBridge: Hex;
   kirchhoffRegistry?: Hex;
@@ -41,8 +43,10 @@ function need(value: Hex | undefined, label: string): Hex {
  * as the OnRamp (it emits nothing, so no CCIP debit exists locally) and, unless the scenario harness deployed its
  * LocalOffRamp, as the OffRamp too (documented in workflows/README.md).
  */
-function rampsFor(record: DeployRecord): { onRamp: Hex; offRamp: Hex } {
-  return TESTNET_RAMPS[record.chainId] ?? { onRamp: record.ccipRouter, offRamp: record.ccipOffRamp ?? record.ccipRouter };
+function rampsFor(record: DeployRecord): { onRamp: Hex; offRamp: Hex; tokenAdminRegistry?: Hex } {
+  const ramps = TESTNET_RAMPS[record.chainId] ?? { onRamp: record.ccipRouter, offRamp: record.ccipOffRamp ?? record.ccipRouter };
+  const registry = record.ccipTokenAdminRegistry;
+  return registry === undefined || /^0x0{40}$/i.test(registry) ? ramps : { ...ramps, tokenAdminRegistry: registry };
 }
 
 export function fromDeployRecords(network: string, records: readonly DeployRecord[]): Deployments {

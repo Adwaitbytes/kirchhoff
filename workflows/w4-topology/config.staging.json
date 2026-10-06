@@ -11,6 +11,136 @@
   },
   "roleGrantedTopic0": "0x2f8788117e7eff1d82e926ec794901d17c78024a50270940304540a733656f0d",
   "minterRole": "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6",
+  "spec": {
+    "specVersion": 1,
+    "token": "kETH",
+    "tokenId": "0xe7cbc0ff4035309f71987d099a88ed33ef6bfd1a7d6c1050befb12561b95eb9c",
+    "model": "lock_release_home",
+    "unit": "tokens",
+    "home": {
+      "chain": {
+        "name": "ethereum-testnet-sepolia",
+        "selector": "16015286601757825753",
+        "alias": "home"
+      },
+      "canonical": "0xb270dcD4f512709DFAedBAab736888699BDa0273",
+      "escrow": "0xdE9A6413AC2C29Cd6621f93FCD872eBB46b6a3D7",
+      "decimals": 18
+    },
+    "remotes": [
+      {
+        "chain": {
+          "name": "ethereum-testnet-sepolia-arbitrum-1",
+          "selector": "3478487238524512106",
+          "alias": "arb"
+        },
+        "token": "0x93EEc1BA5a782ceB99e76Eec6736D900c1cB002d",
+        "minters": [
+          "ccip_pool_arb",
+          "weakbridge_arb"
+        ],
+        "decimals": 18
+      },
+      {
+        "chain": {
+          "name": "ethereum-testnet-sepolia-base-1",
+          "selector": "10344971235874465080",
+          "alias": "base"
+        },
+        "token": "0x93EEc1BA5a782ceB99e76Eec6736D900c1cB002d",
+        "minters": [
+          "ccip_pool_base",
+          "weakbridge_base"
+        ],
+        "decimals": 18
+      }
+    ],
+    "bridges": [
+      {
+        "id": "ccip",
+        "searchWindowBlocks": "100",
+        "maxDeliverySeconds": 1200,
+        "kind": "ccip_v2",
+        "pools": {
+          "home": "0x1c60f8B189E6Ea5F04C9510fAef5021605a22BDe",
+          "arb": "0x98Ec613f16CF077De8b34a7C32f4b767cc90840e",
+          "base": "0x98Ec613f16CF077De8b34a7C32f4b767cc90840e"
+        },
+        "onramps": {
+          "home": "0x8dcf17f298c881A547D91ca4aA3C2AD7568C6777",
+          "arb": "0x6B9a7cF69F90Ae2659bfe3069fba5Aa308A48cC4",
+          "base": "0xA33b221A8427739c76f631a995ca60544bEdD632"
+        },
+        "offramps": {
+          "home": "0xc6A246A9AcdAaE651708706494720F79C3E5d0A1",
+          "arb": "0xC93218EB7B778bC0c13E5296140C8E4Fa1C440DA",
+          "base": "0xa137536A3BFd81aD6f090981268b8C2818451d41"
+        },
+        "lockbox": "0x8fa18a722eED4ef8C40C2552b92Db07ccdD6f899"
+      },
+      {
+        "id": "weakbridge",
+        "searchWindowBlocks": "100",
+        "maxDeliverySeconds": 1200,
+        "kind": "custom",
+        "contracts": {
+          "home": "0xdE9A6413AC2C29Cd6621f93FCD872eBB46b6a3D7",
+          "arb": "0x9bB3062C74C97768b83F48AC2F2bAe38A1dB5D78",
+          "base": "0x9bB3062C74C97768b83F48AC2F2bAe38A1dB5D78"
+        },
+        "events": {
+          "debitEvent": "Burned(bytes32 indexed id, address indexed from, address to, uint256 amount, uint64 dstChain)",
+          "creditEvent": "Released(bytes32 indexed id, address indexed to, uint256 amount, uint64 srcChain)",
+          "debitFields": {
+            "messageId": "id",
+            "amount": "amount",
+            "recipient": "to",
+            "remoteChain": "dstChain"
+          },
+          "creditFields": {
+            "messageId": "id",
+            "amount": "amount",
+            "recipient": "to",
+            "remoteChain": "srcChain"
+          }
+        }
+      }
+    ],
+    "reserves": {
+      "porFeed": null,
+      "decimals": 18
+    },
+    "confidence": {
+      "default": "finalized",
+      "overrides": {
+        "ethereum-testnet-sepolia-base-1": "safe"
+      }
+    },
+    "rules": {
+      "junction": {
+        "matchWindowSeconds": "1200"
+      },
+      "loop": {
+        "toleranceWei": "0",
+        "breachConfirmations": 1
+      },
+      "soft": {
+        "flowLimitPerHour": "50000000000000000000000"
+      },
+      "stalenessSeconds": "120",
+      "onStale": "fail_closed"
+    },
+    "response": {
+      "onBroken": [
+        "freeze_ccip_lanes",
+        "taint_recipient",
+        "flip_feed",
+        "page_issuer"
+      ],
+      "replayRequires": "issuer_multisig",
+      "recoveryTimelockSeconds": "3600"
+    }
+  },
   "chains": [
     {
       "name": "ethereum-testnet-sepolia",
@@ -26,7 +156,11 @@
       "ledger": "0x05fE18C1cb1FF308aF668a7abaAf6Ac3f623B5D3",
       "quarantine": "0xA3c539ccE9b4E6caCe97E8f4FD1346e1D885aC4a",
       "feed": "0x93EEc1BA5a782ceB99e76Eec6736D900c1cB002d",
-      "expectedMinters": []
+      "expectedMinters": [],
+      "ccipPools": [
+        "0x1c60f8B189E6Ea5F04C9510fAef5021605a22BDe"
+      ],
+      "tokenAdminRegistry": "0x95F29FEE11c5C55d26cCcf1DB6772DE953B37B82"
     },
     {
       "name": "ethereum-testnet-sepolia-arbitrum-1",
@@ -45,7 +179,11 @@
       "expectedMinters": [
         "0x98Ec613f16CF077De8b34a7C32f4b767cc90840e",
         "0x9bB3062C74C97768b83F48AC2F2bAe38A1dB5D78"
-      ]
+      ],
+      "ccipPools": [
+        "0x98Ec613f16CF077De8b34a7C32f4b767cc90840e"
+      ],
+      "tokenAdminRegistry": "0x8126bE56454B628a88C17849B9ED99dd5a11Bd2f"
     },
     {
       "name": "ethereum-testnet-sepolia-base-1",
@@ -64,7 +202,16 @@
       "expectedMinters": [
         "0x98Ec613f16CF077De8b34a7C32f4b767cc90840e",
         "0x9bB3062C74C97768b83F48AC2F2bAe38A1dB5D78"
-      ]
+      ],
+      "ccipPools": [
+        "0x98Ec613f16CF077De8b34a7C32f4b767cc90840e"
+      ],
+      "tokenAdminRegistry": "0x736D0bBb318c1B27Ff686cd19804094E66250e17"
     }
+  ],
+  "notifySecrets": [
+    "NOTIFY_TELEGRAM_BOT_TOKEN",
+    "NOTIFY_TELEGRAM_CHAT_ID",
+    "NOTIFY_SLACK_WEBHOOK_URL"
   ]
 }

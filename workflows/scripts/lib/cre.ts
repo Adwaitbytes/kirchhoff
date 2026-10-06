@@ -5,7 +5,7 @@ import type { Hex } from "@kirchhoff/engine";
 
 export type SimulateArgs = {
   workflow: "w1-junction" | "w2-loop" | "w3-responder" | "w4-topology";
-  target: "local" | "scenarios" | "staging";
+  target: "local" | "scenarios" | "staging" | "staging-fallback";
   triggerIndex: number;
   /** EVM log trigger replay: transaction hash and 0-based index of the log in that transaction's receipt. */
   evm?: { txHash: Hex; eventIndex: number };

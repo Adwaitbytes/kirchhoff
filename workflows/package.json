@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "build:wasm": "node scripts/build-wasm.ts",
-    "scenarios": "node scripts/scenarios.ts"
+    "scenarios": "node scripts/scenarios.ts",
+    "runner": "node scripts/runner.ts"
   },
   "dependencies": {
     "@chainlink/cre-sdk": "1.23.0",
