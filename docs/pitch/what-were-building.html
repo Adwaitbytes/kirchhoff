@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KIRCHHOFF · What we are building</title>
+<meta name="description" content="KIRCHHOFF is a Cross-Chain Verifier for Chainlink CCIP 2.0 that refuses to sign any transfer when a token's money stops adding up across chains.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111'/%3E%3Cpath d='M9 8l7 9 7-9M16 17v8' stroke='%237fdcae' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist+Pixel&family=Inter:wght@400;450;500;600;650&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f4f4f1; --paper: #ffffff; --ink: #1a1a1a; --ink-2: #4a4a46; --ink-3: #7a7a74;
+    --line: #e2e2dc; --mint: #7fdcae; --green: #118453; --rose: #be123c; --violet: #6d28d9;
+    --shadow: 0 1px 2px rgba(17,40,30,.05), 0 8px 24px -12px rgba(17,60,40,.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0b0d10; --paper: #12151a; --ink: #f2f2ee; --ink-2: #b9bbb6; --ink-3: #868a85;
+      --line: #252a31; --green: #2dd4bf; --rose: #f43f5e; --violet: #a78bfa;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 32px -16px rgba(0,0,0,.7); }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 450 16px/1.6 Inter, system-ui, sans-serif; letter-spacing: -0.011em;
+    -webkit-font-smoothing: antialiased;
+    background-image: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--ink) 9%, transparent) 1px, transparent 0);
+    background-size: 22px 22px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 56px 20px 80px; }
+  .mono, .eyebrow, .pill, .stat b { font-family: "DM Mono", ui-monospace, monospace; }
+  .eyebrow { font-size: 11.5px; text-transform: uppercase; letter-spacing: .18em; color: var(--ink-3); display: flex; align-items: center; gap: 12px; margin: 0 0 14px; }
+  .eyebrow::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .pill { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; padding: 7px 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); box-shadow: var(--shadow); color: var(--ink-2); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 18%, transparent); }
+  h1 { font-family: "Geist Pixel", Inter, sans-serif; font-weight: 400; font-size: clamp(38px, 8vw, 72px); line-height: 1.05; letter-spacing: -0.01em; margin: 26px 0 14px; }
+  h2 { font-family: "Geist Pixel", Inter, sans-serif; font-weight: 400; font-size: clamp(24px, 4.4vw, 34px); line-height: 1.15; margin: 0 0 12px; }
+  h3 { font-size: 16px; font-weight: 600; margin: 0 0 6px; letter-spacing: -0.015em; }
+  .lede { font-size: clamp(18px, 2.6vw, 22px); line-height: 1.45; color: var(--ink-2); max-width: 680px; margin: 0; }
+  .lede strong { color: var(--ink); font-weight: 600; }
+  .ok { color: var(--green); } .bad { color: var(--rose); }
+  section { margin-top: 64px; }
+  .card { background: var(--paper); border: 1px solid var(--line); border-radius: 18px; padding: 22px; box-shadow: var(--shadow); }
+  .say { position: relative; padding: 26px 24px; }
+  .say p { margin: 0 0 12px; font-size: 17px; }
+  .say p:last-child { margin: 0; }
+  .say .tag { position: absolute; top: -11px; left: 20px; background: var(--ink); color: var(--bg); font: 500 11px "DM Mono", monospace; letter-spacing: .14em; text-transform: uppercase; padding: 4px 10px; border-radius: 999px; }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .grid p { margin: 0; color: var(--ink-2); font-size: 15px; }
+  .law { border-left: 3px solid var(--green); }
+  .law.loop { border-left-color: var(--violet); }
+  .formula { font-family: "DM Mono", monospace; font-size: 14px; background: color-mix(in srgb, var(--ink) 4%, transparent); border-radius: 10px; padding: 10px 12px; margin-top: 12px; color: var(--ink); overflow-x: auto; white-space: nowrap; }
+  ol.flow { counter-reset: s; list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+  ol.flow li { counter-increment: s; display: grid; grid-template-columns: 34px 1fr; gap: 12px; align-items: start; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+  ol.flow li::before { content: counter(s, decimal-leading-zero); font: 500 12px "DM Mono", monospace; color: var(--ink-3); padding-top: 3px; }
+  ol.flow li b { font-weight: 600; }
+  ol.flow li.hit { border-color: color-mix(in srgb, var(--rose) 45%, var(--line)); }
+  ol.flow li.hit::before { color: var(--rose); }
+  .stat { padding: 18px; }
+  .stat b { display: block; font-size: clamp(24px, 4vw, 30px); font-weight: 500; letter-spacing: -0.02em; color: var(--ink); line-height: 1.1; }
+  .stat span { display: block; margin-top: 6px; font-size: 13.5px; color: var(--ink-2); line-height: 1.45; }
+  .qa details { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 2px 18px; margin-bottom: 10px; }
+  .qa summary { cursor: pointer; padding: 14px 0; font-weight: 600; list-style: none; display: flex; justify-content: space-between; gap: 12px; }
+  .qa summary::-webkit-details-marker { display: none; }
+  .qa summary::after { content: "+"; font-family: "DM Mono", monospace; color: var(--ink-3); }
+  .qa details[open] summary::after { content: "−"; }
+  .qa details p { margin: 0 0 16px; color: var(--ink-2); }
+  .strike { text-decoration: line-through; text-decoration-color: var(--rose); color: var(--ink-3); font-family: "DM Mono", monospace; font-size: 14px; }
+  .links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+  .links a { color: var(--ink); text-decoration: none; border-bottom: 1px solid var(--line); font-weight: 500; }
+  .links a:hover, .links a:focus-visible { border-color: var(--green); }
+  a:focus-visible, summary:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; border-radius: 6px; }
+  footer { margin-top: 64px; color: var(--ink-3); font-size: 13px; }
+  @media (max-width: 680px) {
+    .wrap { padding: 36px 16px 64px; }
+    .grid, .grid.three { grid-template-columns: 1fr; }
+    section { margin-top: 48px; }
+    .say p { font-size: 16px; }
+  }
+</style>
+</head>
+<body>
+<main class="wrap">
+
+  <span class="pill"><span class="dot"></span>CCIP 2.0 · Chainlink CRE · TOKEN2049</span>
+  <h1>Every bridge checks who signed.</h1>
+  <p class="lede"><strong>KIRCHHOFF checks if the money adds up.</strong> We built the first economic verifier for Chainlink CCIP 2.0: a Cross-Chain Verifier that refuses to sign a transfer the moment a token's supply stops balancing across chains.</p>
+
+  <section>
+    <p class="eyebrow">The 10 second answer</p>
+    <div class="card say">
+      <span class="tag">Say this</span>
+      <p>"Bridges get hacked because they only verify signatures. We verify the math. KIRCHHOFF watches a token on every chain through Chainlink CRE, and if anyone mints or releases value that was never locked or burned, our verifier inside CCIP 2.0 refuses to sign, so the fake money cannot move."</p>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">The 60 second answer</p>
+    <div class="card say">
+      <span class="tag">If they lean in</span>
+      <p>In April 2026 one forged LayerZero message released about 116,500 rsETH, roughly $292M, from Kelp DAO's bridge, and holders on 20 chains lost value. The bridge had one verifier. Nothing checked whether the release was economically possible.</p>
+      <p>Chainlink just launched CCIP 2.0, where a token issuer can require its own verifier beside Chainlink's Committee Verifier. We built that verifier, and it enforces one law borrowed from Kirchhoff's circuit laws: what flows out of a junction must equal what flows in.</p>
+      <p>Our engine runs as Chainlink CRE workflows that read every chain with DON consensus. A forged credit is caught in the same workflow run it appears, the token is quarantined on every chain, and every CCIP transfer of it is refused. Lending markets read our feed and stop accepting it as collateral.</p>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Two laws</p>
+    <div class="grid">
+      <div class="card law">
+        <h3>Junction Rule, per message</h3>
+        <p>Every credit on a destination chain must match exactly one finalized debit on the source chain: same message id, amount and recipient, never consumed before. A credit with no debit is forged. This is what catches the Kelp pattern on the very first transaction.</p>
+        <div class="formula">credit(id, amount) ⇒ ∃! debit(id, amount), finalized</div>
+      </div>
+      <div class="card law loop">
+        <h3>Loop Rule, across every chain</h3>
+        <p>Backing must cover everything that claims it. Escrow on the home chain must be at least the supply on every remote chain plus what is in flight. A deficit means value was created from nothing, on any bridge, even a compromised mint key with no message at all.</p>
+        <div class="formula">Δ = Escrow − (Σ Supply + In flight) ≥ 0</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">What happens when someone forges a message</p>
+    <ol class="flow">
+      <li><div><b>The forgery.</b> A single verifier key signs a bridge credit with no matching burn. 116,500 kETH is released on Ethereum Sepolia.</div></li>
+      <li class="hit"><div><b>Detected in the same run.</b> A CRE log trigger fires on the release, searches the source chains for the debit at finalized blocks, finds none, and writes a signed BREACH report to the ledger on all three chains.</div></li>
+      <li class="hit"><div><b>Contained everywhere.</b> CCIP lanes freeze, the attacker is tainted, and the onchain Conservation Feed flips to BROKEN.</div></li>
+      <li class="hit"><div><b>The escape is refused.</b> The attacker tries to bridge the stolen tokens through CCIP. Our verifier and token pool refuse, so the message never executes.</div></li>
+      <li class="hit"><div><b>Nobody lends against it.</b> The token's own transfer guard blocks the tainted wallet, and a lending market reading our feed reverts every borrow.</div></li>
+      <li><div><b>Recovery is human and slow by design.</b> Only the issuer's 2 of 3 multisig can resolve, a timelock runs, and a CRE report alone can never clear BROKEN.</div></li>
+    </ol>
+  </section>
+
+  <section>
+    <p class="eyebrow">Why it is new</p>
+    <div class="grid">
+      <div class="card"><h3>Nobody verifies economics</h3><p>Bridges and verifier networks check <span class="strike">who signed</span>. Monitoring tools alert but cannot stop anything. We found no public CCV that checks economic conservation, and CCIP 2.0 opened that slot on September 28, 2026.</p></div>
+      <div class="card"><h3>It sees every bridge</h3><p>A bridge can only see its own messages. KIRCHHOFF watches total supply across all chains and all bridges, so an exploit on a different bridge is still stopped at the CCIP door.</p></div>
+      <div class="card"><h3>AI onboards, math decides</h3><p>A Spec Copilot turns a plain English description into a machine checked token spec with provenance on every line. AI never sits in the veto path; verdicts come only from deterministic math over consensus data.</p></div>
+      <div class="card"><h3>Additive, never a replacement</h3><p>We sit beside Chainlink's Committee Verifier. A transfer needs both signatures, so KIRCHHOFF only ever adds a second, independent reason to say no.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Built and measured</p>
+    <div class="grid three">
+      <div class="card stat"><b>3 testnets</b><span>Contracts deployed and verified on Ethereum, Arbitrum and Base Sepolia, live CRE epochs and breaches onchain</span></div>
+      <div class="card stat"><b>9.3 ms</b><span>Verifier p99 at 100 requests per second against real contracts and two independent RPCs</span></div>
+      <div class="card stat"><b>2 to 4 s</b><span>From a breach block reaching finality to BROKEN onchain on every chain</span></div>
+      <div class="card stat"><b>10,000</b><span>Random histories in property tests: every forgery flagged, zero false alarms</span></div>
+      <div class="card stat"><b>0 false</b><span>BROKEN verdicts over the token's real testnet history, with every forged release caught</span></div>
+      <div class="card stat"><b>112 s</b><span>Spec Copilot onboarding the demo token on testnet, 49 of 49 fields correct</span></div>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Under the hood</p>
+    <div class="grid">
+      <div class="card"><h3>Chainlink CRE</h3><p>Four TypeScript workflows: Junction Watch, Loop Ledger, Responder, Topology Watch. EVM log and cron triggers, consensus reads at pinned blocks, signed reports through the KeystoneForwarder.</p></div>
+      <div class="card"><h3>CCIP 2.0 verifier</h3><p>A policy hook running inside the official CCV Starter Kit cell, HMAC authenticated, reading status through two independent RPC providers, plus a CCIP token pool that enforces the same rule at execution time.</p></div>
+      <div class="card"><h3>Onchain suite</h3><p>Ledger, Quarantine, an AggregatorV3 compatible Conservation Feed, Registry with timelocked specs, transfer Guard. Solidity with unit, fuzz and invariant tests.</p></div>
+      <div class="card"><h3>Mission Control</h3><p>A live circuit map of every chain, the conservation meter, the verdict stream and an incident room. REST, WebSocket, SDK and an MCP server so AI agents check before they bridge.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">The business</p>
+    <div class="grid three">
+      <div class="card"><h3>Per message</h3><p>CCIP 2.0 lets verifiers charge their own fee on top of the base fee.</p></div>
+      <div class="card"><h3>Issuers</h3><p>Monitoring, incident room, spec onboarding and backtests for multi chain LRT, LST, wrapped BTC and stablecoin issuers.</p></div>
+      <div class="card"><h3>Feed</h3><p>Lending markets read one feed and auto freeze broken collateral. The more markets read it, the more issuers need to be on it.</p></div>
+    </div>
+  </section>
+
+  <section class="qa">
+    <p class="eyebrow">Tough questions, ready answers</p>
+    <details><summary>Is this just monitoring?</summary><p>No. Monitoring alerts, we veto. Our verifier withholds its signature inside CCIP, so a broken token's transfers do not execute. The hero moment of our demo is a refused transaction, not a chart.</p></details>
+    <details><summary>What if your servers go down?</summary><p>Nothing we operate alone can produce a verdict. Verdicts come from CRE DON consensus data and onchain state. If our UI or API is offline, every verdict still works, and if fresh data stops arriving the token fails closed by default.</p></details>
+    <details><summary>Could your AI approve something bad?</summary><p>AI has no write powers and no place in the veto path. It drafts specs and explains incidents, and every claim it makes must cite a tool result. We test it against prompt injection hidden in contract names and comments.</p></details>
+    <details><summary>Can you undo the first fraudulent release?</summary><p>Not on a bridge we do not sit on, and we say so openly. We contain it within one CRE run: the fake supply cannot spread through CCIP, cannot move on Guard enabled tokens, and cannot be borrowed against.</p></details>
+    <details><summary>Why Chainlink?</summary><p>CCIP 2.0 is the first place an issuer can require its own verifier on every message, and CRE gives us decentralized, consensus verified reads across many chains with signed onchain writes. The product does not exist without both.</p></details>
+  </section>
+
+  <section>
+    <p class="eyebrow">See it</p>
+    <div class="card">
+      <h2>Kirchhoff's law, for money.</h2>
+      <p style="margin:0;color:var(--ink-2)">Live Mission Control on real testnet data, the full source, and the Kelp Replay you can run yourself. Demo elements are labeled Testnet simulation.</p>
+      <div class="links mono">
+        <a href="https://kirchhoff-two.vercel.app">kirchhoff-two.vercel.app</a>
+        <a href="https://github.com/Adwaitbytes/kirchhoff">github.com/Adwaitbytes/kirchhoff</a>
+      </div>
+    </div>
+  </section>
+
+  <footer class="mono">KIRCHHOFF · Conservation Verifier for cross chain value · Testnet simulation</footer>
+</main>
+</body>
+</html>
