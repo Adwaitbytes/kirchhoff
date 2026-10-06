@@ -79,7 +79,7 @@ function HeroScene() {
   const data = st.data;
   const chains = data?.chains ?? [];
   return (
-    <div className="relative mx-auto mt-6 grid w-full max-w-[1280px] grid-cols-1 items-center gap-6 px-4 sm:mt-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)_minmax(0,1fr)] lg:gap-4">
+    <div className="relative mx-auto mt-6 grid w-full max-w-[1280px] lg:-mt-2 grid-cols-1 items-center gap-6 px-4 sm:mt-6 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.9fr)_minmax(0,0.8fr)] lg:gap-2">
       {/* Left: the attacker, slightly out of focus, like a figure behind glass. */}
       <aside
         aria-label="Attacker console, testnet simulation"
@@ -97,7 +97,7 @@ function HeroScene() {
       </aside>
 
       <div className="order-1 lg:order-2">
-        <JunctionScene className="mx-auto aspect-[5/4] w-full max-w-[760px]" />
+        <JunctionScene className="mx-auto aspect-[1/1] w-full max-w-[880px] sm:aspect-[4/3]" />
         <div className="mt-1 flex justify-center">
           <LiveStatus />
         </div>
@@ -207,7 +207,7 @@ function Hero() {
 function Stat({ value, label, href, source }: { value: string; label: string; href: string; source: string }) {
   return (
     <div className="border-t border-wire pt-5">
-      <p className="font-display text-[clamp(28px,3vw,40px)] leading-none text-fg tnum">{value}</p>
+      <p className="font-num text-[clamp(28px,3vw,40px)] leading-none text-fg">{value}</p>
       <p className="mt-1.5 max-w-[26ch] text-[15px] leading-snug text-muted">{label}</p>
       <a href={href} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs text-subtle underline decoration-dotted underline-offset-4 hover:text-fg">
         {source}
@@ -225,7 +225,7 @@ function Problem() {
           <h2 id="problem-title" className="eyebrow text-muted">
             One forged message
           </h2>
-          <p className="font-display relative isolate mt-4 text-[clamp(72px,14vw,176px)] leading-[0.9] text-fg tnum">
+          <p className="font-num relative isolate mt-4 text-[clamp(72px,14vw,176px)] leading-[0.9] text-fg">
             <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 -inset-y-12 -z-10 bg-[radial-gradient(farthest-side,color-mix(in_oklab,var(--status-broken)_18%,transparent),transparent)]" />
             $292M
           </p>

@@ -45,14 +45,16 @@ function Row({ v, decimals, symbol, fresh }: { v: Verdict; decimals: number; sym
       <time dateTime={v.evaluatedAt} className="font-mono text-xs text-subtle tnum">
         {formatTime(v.evaluatedAt)}
       </time>
-      <div className="min-w-0">
+      <div className="@container min-w-0">
         {fail ? (
           <p className="line-clamp-2 text-sm font-medium leading-snug text-broken">{refusedCopy(v)}</p>
         ) : (
-          <p className="flex min-w-0 items-center gap-1.5 truncate text-sm text-fg">
-            {CHAINS[v.srcChain].name}
+          <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-sm text-fg" title={`${CHAINS[v.srcChain].name} to ${CHAINS[v.dstChain].name}`}>
+            {/* Dense row: short labels on screen, full names for assistive tech and on hover. */}
+            <span className="sr-only">{`${CHAINS[v.srcChain].name} to ${CHAINS[v.dstChain].name}`}</span>
+            <span className="whitespace-nowrap" aria-hidden="true">{CHAINS[v.srcChain].short}</span>
             <ArrowRight className="size-3.5 shrink-0 text-subtle" aria-hidden="true" />
-            {CHAINS[v.dstChain].name}
+            <span className="whitespace-nowrap" aria-hidden="true">{CHAINS[v.dstChain].short}</span>
           </p>
         )}
         <p className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted">
@@ -61,12 +63,18 @@ function Row({ v, decimals, symbol, fresh }: { v: Verdict; decimals: number; sym
           </a>
           <span className="text-subtle">·</span>
           {fail ? (
-            <span className="truncate">
-              {CHAINS[v.srcChain].short} to {CHAINS[v.dstChain].short}, never executed
+            <span className="whitespace-nowrap" title={`${CHAINS[v.srcChain].name} to ${CHAINS[v.dstChain].name}, never executed`}>
+              <span className="sr-only">{`${CHAINS[v.srcChain].name} to ${CHAINS[v.dstChain].name}, never executed`}</span>
+              <span aria-hidden="true">
+                {CHAINS[v.srcChain].short} to {CHAINS[v.dstChain].short}
+              </span>
             </span>
           ) : (
-            <span className="truncate">
-              <span className="font-mono">{v.reason}</span> · {agreeing} of {v.cells.length} cells{p50 !== null && p50 !== undefined ? ` · ${p50}ms` : ""}
+            // Narrow columns drop the detail by priority instead of clipping it mid-word.
+            <span className="flex min-w-0 items-center gap-1 whitespace-nowrap" title={`${v.reason} · ${agreeing} of ${v.cells.length} cells${p50 !== null && p50 !== undefined ? ` · ${p50}ms` : ""}`}>
+              <span className="font-mono">{v.reason}</span>
+              <span className="hidden @[12.5rem]:inline">· {agreeing} of {v.cells.length} cells</span>
+              {p50 !== null && p50 !== undefined ? <span className="hidden @[15rem]:inline">· {p50}ms</span> : null}
             </span>
           )}
         </p>

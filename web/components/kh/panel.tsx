@@ -17,9 +17,9 @@ export function PanelHeader({ title, meta, actions, id, className }: { title: Re
       </h2>
       {meta ? (
         typeof meta === "string" && meta.split(/\s+/).length > 6 ? (
-          <div className="min-w-0 truncate text-[13px] text-subtle">{meta}</div>
+          <div className="min-w-0 text-pretty text-[13px] leading-snug text-subtle">{meta}</div>
         ) : (
-          <div className="min-w-0 truncate font-mono text-2xs uppercase tracking-[0.08em] text-subtle">{meta}</div>
+          <div className="min-w-0 text-pretty font-mono text-2xs uppercase tracking-[0.08em] text-subtle">{meta}</div>
         )
       ) : null}
       {actions ? <div className="ml-auto flex shrink-0 items-center gap-2">{actions}</div> : null}

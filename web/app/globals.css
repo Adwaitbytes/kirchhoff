@@ -119,9 +119,9 @@
   --color-mint: var(--mint);
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-dm-mono), ui-monospace, "SFMono-Regular", monospace;
+  --font-mono: var(--font-digits), var(--font-dm-mono), ui-monospace, "SFMono-Regular", monospace;
   /* Display only: hero and section titles, the Δ readout, big KPIs, page titles. */
-  --font-display: var(--font-geist-pixel), var(--font-dm-mono), ui-monospace, monospace;
+  --font-display: var(--font-digits), var(--font-geist-pixel), var(--font-dm-mono), ui-monospace, monospace;
 
   --text-2xs: calc(11px * var(--type-scale));
   --text-2xs--line-height: 1.35;
@@ -250,11 +250,22 @@
   }
 
   /* Geist Pixel: display only. Its pixel grid wants tight but not crushed tracking. */
+  /* Geist Pixel has only 400, so 620 lands on the Inter digits alone (no synthesis): plain, heavy, tabular numerals. */
   .font-display {
     font-family: var(--font-display);
-    font-weight: 400;
+    font-weight: 620;
     letter-spacing: -0.01em;
-    font-feature-settings: normal;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
+  /* Hero numbers: the Δ readout and KPIs. Inter, heavy, tabular, tight: a plain zero, never "Ø". */
+  .font-num {
+    font-family: var(--font-sans);
+    font-weight: 620;
+    letter-spacing: -0.035em;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum", "cv11";
   }
 
   /* DM Mono eyebrow: small, uppercase, widely tracked. */

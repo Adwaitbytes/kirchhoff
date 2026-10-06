@@ -58,7 +58,7 @@ export function DeltaReadout({ delta, decimals, symbol, href, size = "hero" }: {
           data-testid="delta-readout"
           style={{ minWidth: `${reserve}ch`, display: "inline-block" }}
           className={cn(
-            "font-display tnum transition-colors duration-300",
+            "font-num transition-colors duration-300",
             size === "hero" ? "text-3xl" : "text-2xl",
             negative ? "text-broken" : "text-fg",
           )}

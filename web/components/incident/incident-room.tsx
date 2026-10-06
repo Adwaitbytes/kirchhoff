@@ -42,7 +42,10 @@ function TopStrip({ id }: { id: string }) {
       <span className="text-subtle" aria-hidden="true">
         /
       </span>
-      <span className="truncate font-mono text-sm text-fg">{shortHash(id, 10, 6)}</span>
+      <span className="whitespace-nowrap font-mono text-sm text-fg">
+        <span className="sm:hidden">{shortHash(id, 6, 4)}</span>
+        <span className="hidden sm:inline">{shortHash(id, 10, 6)}</span>
+      </span>
       <SimulationLabel className="ml-auto" />
     </div>
   );
@@ -139,18 +142,18 @@ function Header({ r, decimals }: { r: IncidentResponse; decimals: number }) {
         )}
         <div className="mt-5 grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
           <Stat label="Δ after" hint={`Before ${formatAmount(parseWei(i.deltaBefore), { decimals, signed: true, maxFraction: 0 })}`}>
-            <Verifiable href={ledgerRead} label="Δ after, read ConservationLedger onchain" className={cn("font-display text-2xl leading-none", delta < 0n ? "text-broken" : "text-fg")}>
+            <Verifiable href={ledgerRead} label="Δ after, read ConservationLedger onchain" className={cn("font-num text-2xl leading-none", delta < 0n ? "text-broken" : "text-fg")}>
               {formatAmount(delta, { decimals, signed: true, maxFraction: 0 })}
             </Verifiable>
             <span className="ml-1.5 text-xs text-muted">{i.token}</span>
           </Stat>
           <Stat label={loop ? "Detection to BROKEN" : "Offending block to BROKEN"} hint={`${formatDateTime(i.offendingBlockAt)}`}>
             {firstBreach?.tx ? (
-              <Verifiable href={txRefUrl(firstBreach.tx)} label="First BREACH report transaction" className="font-display text-xl text-fg">
+              <Verifiable href={txRefUrl(firstBreach.tx)} label="First BREACH report transaction" className="font-num text-xl text-fg">
                 {formatSeconds(i.timeToBrokenSeconds)}
               </Verifiable>
             ) : (
-              <span className="font-display text-xl text-fg tnum">{formatSeconds(i.timeToBrokenSeconds)}</span>
+              <span className="font-num text-xl text-fg">{formatSeconds(i.timeToBrokenSeconds)}</span>
             )}
           </Stat>
           <Stat label={loop ? "Home BREACH report" : "Offending credit"} hint={`Recipient ${orNa(i.offending.recipient, (a) => shortHash(a))}`}>

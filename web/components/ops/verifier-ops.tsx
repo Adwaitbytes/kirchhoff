@@ -61,7 +61,7 @@ function Stat({ label, value, unit, hint, testId, tone = "fg", href, source }: {
   return (
     <div className="relative overflow-hidden rounded-lg border border-wire bg-panel px-4 py-3.5 shadow-[inset_0_1px_0_0_var(--panel-highlight),0_1px_2px_rgb(0_0_0/0.04)]" data-testid={testId}>
       <p className="text-xs text-muted">{label}</p>
-      <p className={cn("font-display mt-2 text-2xl leading-none tnum", tone === "conserved" ? "text-conserved" : tone === "broken" ? "text-broken" : "text-fg")}>
+      <p className={cn("font-num mt-2 text-2xl leading-none", tone === "conserved" ? "text-conserved" : tone === "broken" ? "text-broken" : "text-fg")}>
         <Fig href={href} label={`${label}, ${source}`}>
           {value}
         </Fig>

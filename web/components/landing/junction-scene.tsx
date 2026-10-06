@@ -54,11 +54,11 @@ export function JunctionScene({ className }: { className?: string }) {
     <div ref={hostRef} className={cn("relative", className)} aria-hidden="true">
       {/* Poster: the junction in CSS, visible until WebGL draws (and forever if it cannot). */}
       <div className={cn("pointer-events-none absolute inset-0 flex items-center justify-center transition-opacity duration-700", ready && !failed ? "opacity-0" : "opacity-100")}>
-        <div className="relative aspect-square w-[46%] max-w-[260px]">
-          <div className="absolute inset-0 rounded-full border border-mint/50 bg-[radial-gradient(circle,color-mix(in_oklab,var(--mint)_45%,transparent),transparent_70%)]" />
-          <div className="absolute inset-[18%] rounded-full border border-mint/60" />
-          <div className="absolute inset-[36%] rounded-full border border-mint/70 bg-mint/20" />
-          <div className="absolute left-1/2 top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_24px_var(--mint)]" />
+        <div className="relative -mt-[6%] aspect-square w-[40%] max-w-[320px] rounded-[20%] border-[18px] border-[#2b3134] light:border-white bg-[linear-gradient(140deg,color-mix(in_oklab,var(--mint)_28%,transparent),color-mix(in_oklab,#1d6250_18%,transparent))] shadow-[0_40px_70px_-36px_rgb(17_60_40/0.5)]">
+          <svg viewBox="0 0 32 32" className="absolute inset-[8%] text-mint" fill="none">
+            <path d="M16 15 L6.5 7.5 M16 15 L25.5 7.5 M16 15 V25" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" opacity="0.7" />
+            <circle cx="16" cy="15" r="1.6" fill="white" />
+          </svg>
         </div>
       </div>
       <canvas ref={canvasRef} className={cn("absolute inset-0 h-full w-full transition-opacity duration-700", ready ? "opacity-100" : "opacity-0")} />

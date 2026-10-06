@@ -37,21 +37,21 @@ export function LedgerTable({ status, onOpenChain }: { status: TokenStatusRespon
             <span className="hidden text-xs text-subtle 2xl:inline">{c.role === "home" ? "home" : "remote"} · {c.confidence}</span>
           </span>
         </th>
-        <td className="px-3 text-right">
+        <td className="px-2 text-right">
           <Amount value={c.supply} decimals={d} href={tokenUrl(c.chain, c.contracts.token)} label={`${CHAINS[c.chain].name} supply, token contract`} />
         </td>
-        <td className="px-3 text-right">
+        <td className="px-2 text-right">
           <Amount value={c.escrow} decimals={d} href={c.contracts.escrow ? escrowBalanceUrl(c.chain, c.contracts.token, c.contracts.escrow) : ledgerRead} label={`${CHAINS[c.chain].name} escrow balance`} />
         </td>
-        <td className="px-3 text-right">
+        <td className="px-2 text-right">
           <Amount value={inFlight} decimals={d} href={ledgerRead} label={`${CHAINS[c.chain].name} in flight, ledger read`} />
         </td>
-        <td className="px-3 text-right">
+        <td className="px-2 text-right">
           <Verifiable href={blockUrl(c.chain, c.pinnedBlock.number)} label={`Pinned block ${c.pinnedBlock.number} on ${CHAINS[c.chain].name}`} className="font-mono text-xs text-muted">
             {Number(c.pinnedBlock.number).toLocaleString("en-US")}
           </Verifiable>
         </td>
-        <td className="py-2 pl-3 pr-4 text-right">
+        <td className="py-2 pl-2 pr-4 text-right">
           <StatusWord status={c.ledgerStatus} className="text-xs" />
         </td>
       </tr>
@@ -105,11 +105,11 @@ export function LedgerTable({ status, onOpenChain }: { status: TokenStatusRespon
         <thead>
           <tr className="whitespace-nowrap border-b border-wire font-mono text-2xs uppercase tracking-[0.12em] text-subtle">
             <th scope="col" className="py-2 pl-4 pr-3 text-left font-medium">Chain</th>
-            <th scope="col" className="px-3 text-right font-medium">Supply</th>
-            <th scope="col" className="px-3 text-right font-medium">Escrow</th>
-            <th scope="col" className="px-3 text-right font-medium">In flight</th>
-            <th scope="col" className="px-3 text-right font-medium">Pinned block</th>
-            <th scope="col" className="py-2 pl-3 pr-4 text-right font-medium">Ledger</th>
+            <th scope="col" className="px-2 text-right font-medium">Supply</th>
+            <th scope="col" className="px-2 text-right font-medium">Escrow</th>
+            <th scope="col" className="px-2 text-right font-medium">In flight</th>
+            <th scope="col" className="px-2 text-right font-medium">Pinned block</th>
+            <th scope="col" className="py-2 pl-2 pr-4 text-right font-medium">Ledger</th>
           </tr>
         </thead>
         <tbody>{status.chains.map(row)}</tbody>
